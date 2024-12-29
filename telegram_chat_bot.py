@@ -20,6 +20,7 @@ connections = {}  # Хранит пары пользователей {user1_id: 
 @bot.message_handler(commands=['start'])
 def start_command(message):
     bot.send_message(message.chat.id, "Привет! Используйте меню для работы с ботом.")
+    bot.send_message(message.chat.id, f"Ваш Telegram ID: {message.chat.id}")
     show_main_menu(message.chat.id)
 
 # Отображение основного меню
