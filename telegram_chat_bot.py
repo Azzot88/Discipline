@@ -1,7 +1,19 @@
 import telebot
 from telebot import types
+from dotenv import load_dotenv
+import os
 
-bot = telebot.TeleBot("YOUR_BOT_TOKEN")
+# Загружаем переменные окружения из файла .env
+load_dotenv()
+
+# Получаем значение переменной окружения
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Проверяем, удалось ли загрузить токен
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError("Telegram bot token is missing. Please check your .env file.")
+
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 connections = {}  # Хранит пары пользователей {user1_id: user2_id}
 
 # Команда /start
