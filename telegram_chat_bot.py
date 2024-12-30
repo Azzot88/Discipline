@@ -14,7 +14,7 @@ if not TELEGRAM_BOT_TOKEN:
     raise ValueError("Telegram bot token is missing. Please check your .env file.")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-connections = {}  # Хранит пары пользователей {user1_id: user2_id}
+active_chats = {}  # Хранит чаты и участников {chat_id: {user1, user2}}
 
 # Команда /start
 @bot.message_handler(commands=['start'])
@@ -27,87 +27,98 @@ def start_command(message):
 def show_main_menu(chat_id):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(
-        types.KeyboardButton("📒 Выбрать пользователя из контактов"),
-        types.KeyboardButton("❌ Завершить чат")
+        types.KeyboardButton("📒 Пригласить пользователя в чат")
     )
     bot.send_message(chat_id, "Выберите действие:", reply_markup=keyboard)
 
-# Обработчик кнопки выбора пользователя из контактов
-@bot.message_handler(func=lambda message: message.text == "📒 Выбрать пользователя из контактов")
-def select_user_from_contacts(message):
+# Обработчик кнопки приглашения пользователя
+@bot.message_handler(func=lambda message: message.text == "📒 Пригласить пользователя в чат")
+def invite_user_to_chat(message):
     user_id = message.chat.id
 
-    if user_id in connections:
-        bot.send_message(user_id, "Вы уже связаны с пользователем. Завершите текущий чат перед выбором нового.")
+    if user_id in active_chats:
+        bot.send_message(user_id, "Вы уже участвуете в чате. Завершите текущий чат перед созданием нового.")
         return
 
     keyboard = types.InlineKeyboardMarkup()
-    contacts = get_user_contacts(user_id)  # Функция для получения списка контактов пользователя
+    contacts = get_user_contacts(user_id)
 
     if not contacts:
         bot.send_message(user_id, "У вас нет доступных контактов для выбора.")
         return
 
     for contact_id, contact_name in contacts.items():
-        keyboard.add(types.InlineKeyboardButton(contact_name, callback_data=f"connect_{contact_id}"))
+        keyboard.add(types.InlineKeyboardButton(contact_name, callback_data=f"invite_{contact_id}"))
 
-    bot.send_message(user_id, "Выберите пользователя из ваших контактов:", reply_markup=keyboard)
+    bot.send_message(user_id, "Выберите пользователя для приглашения в чат:", reply_markup=keyboard)
 
-# Обработка нажатия на кнопку контакта
-@bot.callback_query_handler(func=lambda call: call.data.startswith("connect_"))
-def connect_to_contact(call):
-    user_id = call.message.chat.id
-    target_user_id = int(call.data.split("_")[1])
+# Обработка приглашения
+@bot.callback_query_handler(func=lambda call: call.data.startswith("invite_"))
+def handle_invite(call):
+    inviter_id = call.message.chat.id
+    invitee_id = int(call.data.split("_")[1])
 
-    if user_id in connections:
-        bot.send_message(user_id, "Вы уже связаны с пользователем. Завершите текущий чат перед выбором нового.")
+    if inviter_id in active_chats:
+        bot.send_message(inviter_id, "Вы уже участвуете в чате.")
         return
 
-    connections[user_id] = target_user_id
-    connections[target_user_id] = user_id
+    bot.send_message(
+        invitee_id,
+        f"Пользователь {inviter_id} приглашает вас в чат. Примите приглашение с помощью /accept или отклоните с помощью /decline."
+    )
+    active_chats[inviter_id] = {"partner": invitee_id, "state": "pending"}
+    bot.send_message(inviter_id, "Приглашение отправлено. Ожидайте ответа.")
 
-    bot.send_message(user_id, f"Вы связаны с пользователем {target_user_id}.")
-    bot.send_message(target_user_id, f"С вами связался пользователь {user_id}.")
-    show_main_menu(user_id)
+# Обработка команды /accept
+@bot.message_handler(commands=['accept'])
+def accept_invite(message):
+    user_id = message.chat.id
+    for inviter_id, chat_data in active_chats.items():
+        if chat_data["partner"] == user_id and chat_data["state"] == "pending":
+            chat_data["state"] = "active"
+            active_chats[user_id] = {"partner": inviter_id, "state": "active"}
 
-# Заглушка функции получения списка контактов пользователя
+            bot.send_message(inviter_id, "Ваше приглашение принято.")
+            bot.send_message(user_id, "Вы присоединились к чату.")
+            start_chat(inviter_id, user_id)
+            return
+
+    bot.send_message(user_id, "Нет активных приглашений.")
+
+# Логика чата
+def start_chat(user1_id, user2_id):
+    bot.send_message(user1_id, "Чат начался. Ожидайте вопросов.")
+    bot.send_message(user2_id, "Чат начался. Ожидайте вопросов.")
+    ask_question(user1_id, user2_id)
+
+def ask_question(user1_id, user2_id):
+    question = "Как вас зовут?"
+    bot.send_message(user1_id, f"Вопрос: {question}")
+    bot.send_message(user2_id, f"Вопрос: {question}")
+    active_chats[user1_id]["question"] = question
+    active_chats[user2_id]["question"] = question
+
+@bot.message_handler(func=lambda message: message.chat.id in active_chats)
+def handle_answer(message):
+    user_id = message.chat.id
+    chat_data = active_chats[user_id]
+    partner_id = chat_data["partner"]
+    question = chat_data.get("question")
+
+    if question:
+        bot.send_message(partner_id, f"Ответ от {user_id}: {message.text}")
+        bot.send_message(user_id, "Ответ получен.")
+        del chat_data["question"]
+
+        if "question" not in active_chats[partner_id]:
+            bot.send_message(user_id, "Ожидаем ответа от вашего собеседника.")
+
+# Заглушка для получения контактов
 def get_user_contacts(user_id):
-    # Здесь должна быть реализована логика для получения контактов пользователя.
-    # Возвращаем словарь {contact_id: contact_name} для примера.
     return {
         123456789: "Контакт 1",
         987654321: "Контакт 2"
     }
-
-# Обработчик завершения чата
-@bot.message_handler(func=lambda message: message.text == "❌ Завершить чат")
-def end_chat(message):
-    user_id = message.chat.id
-
-    if user_id in connections:
-        partner_id = connections.pop(user_id)
-        connections.pop(partner_id, None)
-
-        bot.send_message(user_id, "Вы завершили чат.")
-        bot.send_message(partner_id, "Ваш собеседник завершил чат.")
-    else:
-        bot.send_message(user_id, "У вас нет активного чата.")
-
-    show_main_menu(user_id)
-
-# Пересылка сообщений между пользователями
-@bot.message_handler(func=lambda message: message.chat.id in connections)
-def relay_message(message):
-    user_id = message.chat.id
-    partner_id = connections[user_id]
-
-    bot.send_message(partner_id, message.text)
-
-# Отмена действий
-@bot.message_handler(func=lambda message: message.text == "Отмена")
-def cancel_action(message):
-    bot.send_message(message.chat.id, "Действие отменено.")
-    show_main_menu(message.chat.id)
 
 # Основной цикл работы бота
 bot.polling()
