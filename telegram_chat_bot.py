@@ -15,7 +15,6 @@ if not TELEGRAM_BOT_TOKEN:
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 connections = {}  # Хранит пары пользователей {user1_id: user2_id}
-waiting_users = []  # Список ожидающих пользователей
 
 # Команда /start
 @bot.message_handler(commands=['start'])
@@ -28,30 +27,57 @@ def start_command(message):
 def show_main_menu(chat_id):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     keyboard.add(
-        types.KeyboardButton("🔍 Найти пользователя"),
+        types.KeyboardButton("📒 Выбрать пользователя из контактов"),
         types.KeyboardButton("❌ Завершить чат")
     )
     bot.send_message(chat_id, "Выберите действие:", reply_markup=keyboard)
 
-# Обработчик кнопки поиска
-@bot.message_handler(func=lambda message: message.text == "🔍 Найти пользователя")
-def search_user(message):
+# Обработчик кнопки выбора пользователя из контактов
+@bot.message_handler(func=lambda message: message.text == "📒 Выбрать пользователя из контактов")
+def select_user_from_contacts(message):
     user_id = message.chat.id
 
     if user_id in connections:
-        bot.send_message(user_id, "Вы уже связаны с пользователем. Завершите текущий чат перед поиском нового.")
+        bot.send_message(user_id, "Вы уже связаны с пользователем. Завершите текущий чат перед выбором нового.")
         return
 
-    if waiting_users:
-        partner_id = waiting_users.pop(0)
-        connections[user_id] = partner_id
-        connections[partner_id] = user_id
+    keyboard = types.InlineKeyboardMarkup()
+    contacts = get_user_contacts(user_id)  # Функция для получения списка контактов пользователя
 
-        bot.send_message(user_id, f"👥 Найден пользователь! Вы теперь в чате с ID: {partner_id}")
-        bot.send_message(partner_id, f"👥 Найден пользователь! Вы теперь в чате с ID: {user_id}")
-    else:
-        waiting_users.append(user_id)
-        bot.send_message(user_id, "⌛ Ожидаем другого пользователя для соединения...")
+    if not contacts:
+        bot.send_message(user_id, "У вас нет доступных контактов для выбора.")
+        return
+
+    for contact_id, contact_name in contacts.items():
+        keyboard.add(types.InlineKeyboardButton(contact_name, callback_data=f"connect_{contact_id}"))
+
+    bot.send_message(user_id, "Выберите пользователя из ваших контактов:", reply_markup=keyboard)
+
+# Обработка нажатия на кнопку контакта
+@bot.callback_query_handler(func=lambda call: call.data.startswith("connect_"))
+def connect_to_contact(call):
+    user_id = call.message.chat.id
+    target_user_id = int(call.data.split("_")[1])
+
+    if user_id in connections:
+        bot.send_message(user_id, "Вы уже связаны с пользователем. Завершите текущий чат перед выбором нового.")
+        return
+
+    connections[user_id] = target_user_id
+    connections[target_user_id] = user_id
+
+    bot.send_message(user_id, f"Вы связаны с пользователем {target_user_id}.")
+    bot.send_message(target_user_id, f"С вами связался пользователь {user_id}.")
+    show_main_menu(user_id)
+
+# Заглушка функции получения списка контактов пользователя
+def get_user_contacts(user_id):
+    # Здесь должна быть реализована логика для получения контактов пользователя.
+    # Возвращаем словарь {contact_id: contact_name} для примера.
+    return {
+        123456789: "Контакт 1",
+        987654321: "Контакт 2"
+    }
 
 # Обработчик завершения чата
 @bot.message_handler(func=lambda message: message.text == "❌ Завершить чат")
