@@ -13,7 +13,8 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 
 # Data storage (in production, use a proper database)
-offers = {}
+
+deals = {}  # was 'offers'
 chats = {}
 users = {}
 user_states = {}
@@ -21,115 +22,85 @@ user_states = {}
 # States
 class State:
     IDLE = 'idle'
-    CREATING_OFFER = 'creating_offer'
+    CREATING_DEAL = 'creating_deal' 
     ENTERING_AMOUNT = 'entering_amount'
     ENTERING_TERMS = 'entering_terms'
     ENTERING_DURATION = 'entering_duration'
     SELECTING_FRIENDS = 'selecting_friends'
     IN_CHAT = 'in_chat'
+    SHARING_CONTACT = 'sharing_contact'
 
-# Helper function to create main menu keyboard
 def get_main_menu():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton('📝 Create Offer'))
+    keyboard.add(types.KeyboardButton('📝 Create Deal')) 
     keyboard.add(types.KeyboardButton('👥 My Active Deals'))
     keyboard.add(types.KeyboardButton('📊 My Profile'))
+    keyboard.add(types.KeyboardButton('📱 Share Contact', request_contact=True))
     return keyboard
 
-# Start command handler
 @bot.message_handler(commands=['start'])
 def start_command(message):
     user_id = message.from_user.id
-    users[user_id] = {
-        'username': message.from_user.username,
-        'reputation': 0,
-        'completed_deals': 0,
-        'current_offer': None
-    }
-    user_states[user_id] = State.IDLE
+    if user_id not in users:
+        users[user_id] = {
+            'username': message.from_user.username,
+            'reputation': 0,
+            'completed_deals': 0,
+            ### UPDATED: Renamed field
+            'current_deal': None,  
+            'phone': None,
+            'is_registered': False
+        }
+    user_states[user_id] = State.SHARING_CONTACT
     
     bot.send_message(
         message.chat.id,
-        f"Welcome to P2P Lending Bot, {message.from_user.first_name}!\n"
-        "What would you like to do?",
+        f"Welcome to DealVault Bot, {message.from_user.first_name}!\n"
+        "To use the bot, please share your contact information first.",
         reply_markup=get_main_menu()
     )
 
-# Create offer handler
-@bot.message_handler(func=lambda message: message.text == '📝 Create Offer')
-def create_offer(message):
+@bot.message_handler(func=lambda message: message.text == '📝 Create Deal')
+def create_deal(message):
     user_id = message.from_user.id
-    user_states[user_id] = State.ENTERING_AMOUNT
     
+    if not users[user_id].get('is_registered'):
+        bot.send_message(
+            message.chat.id,
+            "Please share your contact information first to create a deal.",
+            reply_markup=get_main_menu()
+        )
+        return
+    
+    user_states[user_id] = State.ENTERING_AMOUNT
     bot.send_message(
         message.chat.id,
         "Please enter the amount you need:",
         reply_markup=types.ReplyKeyboardRemove()
     )
 
-# Amount handler
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_AMOUNT)
-def handle_amount(message):
-    user_id = message.from_user.id
-    try:
-        amount = float(message.text)
-        users[user_id]['current_offer'] = {'amount': amount}
-        user_states[user_id] = State.ENTERING_TERMS
-        
-        bot.send_message(
-            message.chat.id,
-            "Please describe your terms and conditions:"
-        )
-    except ValueError:
-        bot.send_message(
-            message.chat.id,
-            "Please enter a valid number."
-        )
-
-# Terms handler
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_TERMS)
-def handle_terms(message):
-    user_id = message.from_user.id
-    users[user_id]['current_offer']['terms'] = message.text
-    user_states[user_id] = State.ENTERING_DURATION
-    
-    bot.send_message(
-        message.chat.id,
-        "Please enter the duration (in days):"
-    )
-
-# Duration handler
 @bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_DURATION)
 def handle_duration(message):
     user_id = message.from_user.id
     try:
         duration = int(message.text)
-        users[user_id]['current_offer']['duration'] = duration
+        users[user_id]['current_deal']['duration'] = duration
         user_states[user_id] = State.SELECTING_FRIENDS
         
-        # Create inline keyboard for friend selection
-        keyboard = types.InlineKeyboardMarkup()
-        # Mock friends list (in production, implement proper friend system)
-        mock_friends = [
-            ('Friend 1', '1'),
-            ('Friend 2', '2'),
-            ('Friend 3', '3')
-        ]
+        keyboard = create_users_keyboard(user_id)
         
-        for friend_name, friend_id in mock_friends:
-            keyboard.add(types.InlineKeyboardButton(
-                text=friend_name,
-                callback_data=f"select_friend_{friend_id}"
-            ))
-        
-        keyboard.add(types.InlineKeyboardButton(
-            text="✅ Confirm Selection",
-            callback_data="confirm_friends"
-        ))
+        if len(get_registered_users(user_id)) == 0:
+            bot.send_message(
+                message.chat.id,
+                "There are no registered users available. Please try again later.",
+                reply_markup=get_main_menu()
+            )
+            user_states[user_id] = State.IDLE
+            return
         
         bot.send_message(
             message.chat.id,
-            "Select friends to send the offer to:",
+            "Select users to send the deal to:",
             reply_markup=keyboard
         )
     except ValueError:
@@ -138,194 +109,114 @@ def handle_duration(message):
             "Please enter a valid number of days."
         )
 
-# Callback query handler
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = call.from_user.id
     
     if call.data.startswith('select_friend_'):
         friend_id = call.data.split('_')[2]
-        current_offer = users[user_id]['current_offer']
-        if 'selected_friends' not in current_offer:
-            current_offer['selected_friends'] = set()
-        current_offer['selected_friends'].add(friend_id)
+        current_deal = users[user_id]['current_deal']
+        if 'selected_friends' not in current_deal:
+            current_deal['selected_friends'] = set()
+        current_deal['selected_friends'].add(friend_id)
         
         bot.answer_callback_query(
             call.id,
-            text=f"Friend {friend_id} selected!"
+            text=f"User selected!"
         )
     
     elif call.data == 'confirm_friends':
-        current_offer = users[user_id]['current_offer']
-        if 'selected_friends' not in current_offer or not current_offer['selected_friends']:
-            bot.answer_callback_query(
-                call.id,
-                text="Please select at least one friend!"
-            )
-            return
-        
-        # Create offer
-        offer_id = f"offer_{datetime.now().strftime('%Y%m%d%H%M%S')}_{user_id}"
-        offers[offer_id] = {
-            'creator_id': user_id,
-            'amount': current_offer['amount'],
-            'terms': current_offer['terms'],
-            'duration': current_offer['duration'],
-            'status': 'pending',
-            'invited_friends': list(current_offer['selected_friends'])
-        }
-        
-        # Send invitations to selected friends
-        for friend_id in current_offer['selected_friends']:
-            keyboard = types.InlineKeyboardMarkup()
-            keyboard.add(types.InlineKeyboardButton(
-                text="Accept Offer",
-                callback_data=f"accept_offer_{offer_id}"
-            ))
-            
-            # In production, send to actual friend's chat_id
-            bot.send_message(
-                call.message.chat.id,  # This would be friend's chat_id in production
-                f"New offer received!\n"
-                f"Amount: {current_offer['amount']}\n"
-                f"Terms: {current_offer['terms']}\n"
-                f"Duration: {current_offer['duration']} days",
-                reply_markup=keyboard
-            )
-        
-        # Clear current offer and return to main menu
-        users[user_id]['current_offer'] = None
-        user_states[user_id] = State.IDLE
-        
-        bot.edit_message_text(
-            "Offer sent to selected friends!",
-            call.message.chat.id,
-            call.message.message_id
-        )
-        bot.send_message(
-            call.message.chat.id,
-            "What would you like to do next?",
-            reply_markup=get_main_menu()
-        )
+        handle_friend_confirmation(call)
+
+def handle_friend_confirmation(call):
+    user_id = call.from_user.id
+    current_deal = users[user_id]['current_deal']
     
-    elif call.data.startswith('accept_offer_'):
-        offer_id = call.data.split('_')[2]
-        offer = offers[offer_id]
-        
-        # Create chat for negotiation
-        chat_id = f"chat_{offer_id}_{user_id}"
-        chats[chat_id] = {
-            'offer_id': offer_id,
-            'participants': [offer['creator_id'], user_id],
-            'status': 'active'
-        }
-        
+    if 'selected_friends' not in current_deal or not current_deal['selected_friends']:
+        bot.answer_callback_query(
+            call.id,
+            text="Please select at least one user!"
+        )
+        return
+    
+    # Create deal
+    deal_id = f"deal_{datetime.now().strftime('%Y%m%d%H%M%S')}_{user_id}"
+    deals[deal_id] = {
+        'creator_id': user_id,
+        'amount': current_deal['amount'],
+        'terms': current_deal['terms'],
+        'duration': current_deal['duration'],
+        'status': 'pending',
+        'invited_users': list(current_deal['selected_friends'])
+    }
+    
+    # Send invitations to selected users
+    creator_name = f"{users[user_id]['first_name']} {users[user_id]['last_name']}".strip()
+    if users[user_id].get('username'):
+        creator_name += f" (@{users[user_id]['username']})"
+    
+    for friend_id in current_deal['selected_friends']:
         keyboard = types.InlineKeyboardMarkup()
         keyboard.add(types.InlineKeyboardButton(
-            text="Complete Deal",
-            callback_data=f"complete_deal_{offer_id}"
-        ))
-        keyboard.add(types.InlineKeyboardButton(
-            text="Cancel Deal",
-            callback_data=f"cancel_deal_{offer_id}"
+            text="Accept Deal",
+            callback_data=f"accept_deal_{deal_id}"
         ))
         
-        bot.edit_message_text(
-            f"Offer accepted! You can now discuss details.\n"
-            f"Amount: {offer['amount']}\n"
-            f"Terms: {offer['terms']}\n"
-            f"Duration: {offer['duration']} days",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=keyboard
-        )
+        try:
+            bot.send_message(
+                int(friend_id),
+                f"New deal received from {creator_name}!\n"
+                f"Amount: {current_deal['amount']}\n"
+                f"Terms: {current_deal['terms']}\n"
+                f"Duration: {current_deal['duration']} days",
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            print(f"Failed to send message to user {friend_id}: {e}")
     
-    elif call.data.startswith('complete_deal_'):
-        offer_id = call.data.split('_')[2]
-        offer = offers[offer_id]
-        
-        # Update offer status
-        offer['status'] = 'completed'
-        
-        # Update user reputation
-        creator_id = offer['creator_id']
-        users[creator_id]['completed_deals'] += 1
-        users[creator_id]['reputation'] += 1
-        
-        # Generate badge (mock)
-        badge = {
-            'type': 'completion_badge',
-            'offer_id': offer_id,
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'amount': offer['amount']
-        }
-        
-        bot.edit_message_text(
-            f"Deal completed successfully!\n"
-            f"You've earned a completion badge! 🏆\n"
-            f"Your reputation has increased.",
-            call.message.chat.id,
-            call.message.message_id
-        )
-        bot.send_message(
-            call.message.chat.id,
-            "What would you like to do next?",
-            reply_markup=get_main_menu()
-        )
-
-# Profile handler
-@bot.message_handler(func=lambda message: message.text == '📊 My Profile')
-def show_profile(message):
-    user_id = message.from_user.id
-    user = users.get(user_id, {
-        'reputation': 0,
-        'completed_deals': 0
-    })
+    # Clear current deal and return to main menu
+    users[user_id]['current_deal'] = None
+    user_states[user_id] = State.IDLE
     
+    bot.edit_message_text(
+        "Deal sent to selected users!",
+        call.message.chat.id,
+        call.message.message_id
+    )
     bot.send_message(
-        message.chat.id,
-        f"Your Profile:\n"
-        f"Reputation: ⭐️ {user['reputation']}\n"
-        f"Completed Deals: 🤝 {user['completed_deals']}"
+        call.message.chat.id,
+        "What would you like to do next?",
+        reply_markup=get_main_menu()
     )
 
-# Active deals handler
 @bot.message_handler(func=lambda message: message.text == '👥 My Active Deals')
 def show_active_deals(message):
     user_id = message.from_user.id
-    active_offers = [
-        offer for offer in offers.values()
-        if offer['creator_id'] == user_id and offer['status'] == 'pending'
+    active_deals = [
+        deal for deal in deals.values()
+        if deal['creator_id'] == user_id and deal['status'] == 'pending'
     ]
     
-    if not active_offers:
+    if not active_deals:
         bot.send_message(
             message.chat.id,
             "You don't have any active deals."
         )
         return
     
-    for offer in active_offers:
+    for deal in active_deals:
         bot.send_message(
             message.chat.id,
-            f"Offer ID: {offer['id']}\n"
-            f"Amount: {offer['amount']}\n"
-            f"Terms: {offer['terms']}\n"
-            f"Duration: {offer['duration']} days\n"
-            f"Status: {offer['status']}"
+            f"Deal ID: {deal['id']}\n"
+            f"Amount: {deal['amount']}\n"
+            f"Terms: {deal['terms']}\n"
+            f"Duration: {deal['duration']} days\n"
+            f"Status: {deal['status']}"
         )
-
-# Error handler
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    bot.reply_to(
-        message,
-        "Sorry, I don't understand that command. Please use the menu buttons."
-    )
 
 # Start the bot
 def main():
-    print("Bot started...")
+    print("DealVault Bot started...")
     bot.infinity_polling()
 
 if __name__ == "__main__":
