@@ -148,6 +148,28 @@ def handle_deal_type_selection(message):
             reply_markup=get_deal_types_keyboard()
         )
 
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    user_id = call.from_user.id
+    
+    if call.data.startswith('select_friend_'):
+        friend_id = call.data.split('_')[2]
+        current_deal = users[user_id]['current_deal']
+        if 'selected_friends' not in current_deal:
+            current_deal['selected_friends'] = set()
+        current_deal['selected_friends'].add(friend_id)
+        
+        bot.answer_callback_query(
+            call.id,
+            text="User selected!"
+        )
+    
+    elif call.data == 'confirm_friends':
+        handle_friend_confirmation(call)
+    
+    elif call.data.startswith('accept_deal'):
+        handle_deal_response(call)
+
 def handle_deal_response(call):
     user_id = call.from_user.id
     deal_id = call.data.split('_')[2]
@@ -171,10 +193,66 @@ def handle_deal_response(call):
             call.message.message_id
         )
 
-bot.add_callback_query_handler(callback_handler)
-
-# Add the rest of your existing code here (handle_duration, callback_handler, etc.)
-# Just update the terminology to use "Initiator" and "Savior" in messages
+def handle_friend_confirmation(call):
+    user_id = call.from_user.id
+    current_deal = users[user_id]['current_deal']
+    
+    if 'selected_friends' not in current_deal or not current_deal['selected_friends']:
+        bot.answer_callback_query(
+            call.id,
+            text="Please select at least one user!"
+        )
+        return
+    
+    # Create deal
+    deal_id = f"deal_{datetime.now().strftime('%Y%m%d%H%M%S')}_{user_id}"
+    deals[deal_id] = {
+        'creator_id': user_id,
+        'amount': current_deal['amount'],
+        'terms': current_deal['terms'],
+        'duration': current_deal['duration'],
+        'status': 'pending',
+        'type': current_deal['type'],
+        'invited_users': list(current_deal['selected_friends'])
+    }
+    
+    # Send invitations to selected users
+    creator_name = f"{users[user_id].get('first_name', '')} {users[user_id].get('last_name', '')}".strip()
+    if users[user_id].get('username'):
+        creator_name += f" (@{users[user_id]['username']})"
+    
+    for friend_id in current_deal['selected_friends']:
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton(
+            text="Accept Deal",
+            callback_data=f"accept_deal_{deal_id}"
+        ))
+        
+        try:
+            bot.send_message(
+                int(friend_id),
+                f"New {current_deal['type']} deal received from {creator_name}!\n"
+                f"Amount: {current_deal['amount']}\n"
+                f"Terms: {current_deal['terms']}\n"
+                f"Duration: {current_deal['duration']} days",
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            print(f"Failed to send message to user {friend_id}: {e}")
+    
+    users[user_id]['current_deal'] = None
+    user_states[user_id] = State.IDLE
+    
+    bot.edit_message_text(
+        "Deal sent to selected users!",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.send_message(
+        call.message.chat.id,
+        "What would you like to do next?",
+        reply_markup=get_main_menu()
+    )
 
 def main():
     print("DealVault Bot started...")
