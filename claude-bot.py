@@ -82,7 +82,7 @@ def start_command(message):
             'current_deal': None,
             'phone': None,
             'is_registered': False,
-            'role': None  # Will be either 'Initiator' or 'Savior'
+            'role': None
         }
     user_states[user_id] = State.SHARING_CONTACT
     
@@ -93,7 +93,8 @@ def start_command(message):
     bot.send_message(
         message.chat.id,
         "Welcome to DealVault Bot! 🎉\n\n"
-        "To get started, please share your contact information.",
+        "To get started, please share your contact information.\n"
+        "This will help others find you when creating deals.",
         reply_markup=keyboard
     )
 
@@ -109,7 +110,7 @@ def handle_contact(message):
         bot.send_message(
             message.chat.id,
             "Thank you for sharing your contact! ✅\n\n"
-            "Wanna make a deal? 🤝",
+            "You're all set to start making deals! 🤝",
             reply_markup=get_main_menu()
         )
 
@@ -267,6 +268,8 @@ def handle_username_search(message):
             found_users.append((uid, user_data))
     
     show_search_results(message.chat.id, found_users)
+    # Reset state to SELECTING_FRIENDS after search
+    user_states[user_id] = State.SELECTING_FRIENDS
 
 @bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.SEARCHING_PHONE)
 def handle_phone_search(message):
@@ -282,18 +285,20 @@ def handle_phone_search(message):
             found_users.append((uid, user_data))
     
     show_search_results(message.chat.id, found_users)
+    # Reset state to SELECTING_FRIENDS after search
+    user_states[user_id] = State.SELECTING_FRIENDS
 
 def show_search_results(chat_id, found_users):
     if not found_users:
-        keyboard = types.InlineKeyboardMarkup()
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
         keyboard.add(
-            types.InlineKeyboardButton("🔄 Search Again", callback_data="search_again"),
-            types.InlineKeyboardButton("✅ Done Selecting", callback_data="confirm_friends")
+            types.InlineKeyboardButton("🔍 New Search", callback_data="new_search"),
+            types.InlineKeyboardButton("✅ Done", callback_data="confirm_friends")
         )
         
         bot.send_message(
             chat_id,
-            "No users found. Try searching again or finish selection.",
+            "No users found. Try a new search or finish selection.",
             reply_markup=keyboard
         )
         return
@@ -312,8 +317,8 @@ def show_search_results(chat_id, found_users):
         ))
     
     keyboard.add(
-        types.InlineKeyboardButton("🔄 Search Again", callback_data="search_again"),
-        types.InlineKeyboardButton("✅ Done Selecting", callback_data="confirm_friends")
+        types.InlineKeyboardButton("🔍 New Search", callback_data="new_search"),
+        types.InlineKeyboardButton("✅ Done", callback_data="confirm_friends")
     )
     
     bot.send_message(
@@ -326,13 +331,9 @@ def show_search_results(chat_id, found_users):
 def callback_handler(call):
     user_id = call.from_user.id
     
-    if call.data == "search_again":
+    if call.data == "new_search":
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        bot.send_message(
-            call.message.chat.id,
-            "How would you like to find users?",
-            reply_markup=get_user_search_keyboard()
-        )
+        start_friend_selection(call.message)
         
     elif call.data.startswith('select_friend_'):
         friend_id = call.data.split('_')[2]
