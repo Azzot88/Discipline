@@ -405,6 +405,29 @@ def handle_friend_confirmation(call):
         reply_markup=get_main_menu()
     )
 
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_AMOUNT)
+def handle_amount_entry(message):
+    user_id = message.from_user.id
+    
+    try:
+        amount = float(message.text)
+        if amount <= 0:
+            raise ValueError
+            
+        users[user_id]['current_deal']['amount'] = amount
+        user_states[user_id] = State.ENTERING_TERMS
+        
+        bot.send_message(
+            message.chat.id,
+            "Please enter the terms of your deal:",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+    except ValueError:
+        bot.send_message(
+            message.chat.id,
+            "Please enter a valid amount (number greater than 0)."
+        )
+
 def main():
     print("DealVault Bot started...")
     bot.infinity_polling()
