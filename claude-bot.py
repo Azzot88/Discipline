@@ -38,6 +38,7 @@ class State:
     IN_CHAT = 'in_chat'
     SEARCHING_USERNAME = 'searching_username'
     SEARCHING_PHONE = 'searching_phone'
+    CONTACT_SELECTION = 'contact_selection'
 
 def get_main_menu():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -101,18 +102,78 @@ def start_command(message):
 @bot.message_handler(content_types=['contact'])
 def handle_contact(message):
     user_id = message.from_user.id
+    current_state = user_states.get(user_id)
+    
     if message.contact is not None:
-        users[user_id]['phone'] = message.contact.phone_number
-        users[user_id]['is_registered'] = True
-        users[user_id]['first_name'] = message.contact.first_name
-        users[user_id]['last_name'] = message.contact.last_name
-        
-        bot.send_message(
-            message.chat.id,
-            "Thank you for sharing your contact! ✅\n\n"
-            "You're all set to start making deals! 🤝",
-            reply_markup=get_main_menu()
-        )
+        if current_state == State.SHARING_CONTACT:
+            # Handle initial registration
+            users[user_id]['phone'] = message.contact.phone_number
+            users[user_id]['is_registered'] = True
+            users[user_id]['first_name'] = message.contact.first_name
+            users[user_id]['last_name'] = message.contact.last_name
+            
+            bot.send_message(
+                message.chat.id,
+                "Thank you for sharing your contact! ✅\n\n"
+                "You're all set to start making deals! 🤝",
+                reply_markup=get_main_menu()
+            )
+            user_states[user_id] = State.IDLE
+            
+        elif current_state == State.CONTACT_SELECTION:
+            # Handle friend selection
+            contact = message.contact
+            found_user = None
+            
+            # Search for user by phone number
+            for uid, user_data in users.items():
+                if (user_data.get('phone') == contact.phone_number and 
+                    uid != user_id and 
+                    user_data.get('is_registered')):
+                    found_user = (uid, user_data)
+                    break
+            
+            if found_user:
+                # Add to selected friends
+                current_deal = users[user_id]['current_deal']
+                if 'selected_friends' not in current_deal:
+                    current_deal['selected_friends'] = set()
+                
+                friend_id, friend_data = found_user
+                current_deal['selected_friends'].add(friend_id)
+                
+                # Show current selection
+                selected_names = []
+                for fid in current_deal['selected_friends']:
+                    user_data = users.get(int(fid), {})
+                    name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}"
+                    if user_data.get('username'):
+                        name += f" (@{user_data['username']})"
+                    selected_names.append(name)
+                
+                # Create keyboard for continuing or selecting more
+                keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+                keyboard.add(
+                    types.KeyboardButton('👥 Select More Recipients', request_contact=True),
+                    types.KeyboardButton('✅ Continue with Selected'),
+                    types.KeyboardButton('↩️ Back to Main Menu')
+                )
+                
+                selection_text = "Currently selected recipients:\n" + "\n".join(
+                    f"• {name}" for name in selected_names
+                )
+                
+                bot.send_message(
+                    message.chat.id,
+                    f"{selection_text}\n\nYou can select more recipients or continue with current selection.",
+                    reply_markup=keyboard
+                )
+            else:
+                bot.send_message(
+                    message.chat.id,
+                    "This contact is not registered in our system. Please select another contact.",
+                    reply_markup=message.reply_markup
+                )
 
 @bot.message_handler(func=lambda message: message.text == '📝 Create Deal')
 def create_deal(message):
@@ -226,10 +287,19 @@ def start_friend_selection(message):
     user_id = message.from_user.id
     users[user_id]['current_deal']['selected_friends'] = set()
     
+    # Create keyboard with contact selection button
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+    keyboard.add(
+        types.KeyboardButton('👥 Select Recipients', request_contact=True),
+        types.KeyboardButton('↩️ Back to Main Menu')
+    )
+    
+    user_states[user_id] = State.CONTACT_SELECTION
+    
     bot.send_message(
         message.chat.id,
-        "How would you like to find users?",
-        reply_markup=get_user_search_keyboard()
+        "Please select recipients for your deal:",
+        reply_markup=keyboard
     )
 
 @bot.message_handler(func=lambda message: message.text == '🔍 Search by Username')
@@ -471,6 +541,51 @@ def handle_chat_message(message):
     if current_deal and 'chat_with' in current_deal:
         other_user_id = current_deal['chat_with']
         bot.forward_message(other_user_id, message.chat.id, message.message_id)
+
+# Add handler for continuing with selected friends
+@bot.message_handler(func=lambda message: message.text == '✅ Continue with Selected')
+def handle_selection_complete(message):
+    user_id = message.from_user.id
+    current_deal = users[user_id]['current_deal']
+    
+    if not current_deal.get('selected_friends'):
+        bot.send_message(
+            message.chat.id,
+            "Please select at least one recipient for your deal.",
+            reply_markup=message.reply_markup
+        )
+        return
+    
+    # Create confirmation keyboard
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        types.InlineKeyboardButton("✅ Confirm Deal", callback_data="confirm_deal"),
+        types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_deal")
+    )
+    
+    # Show deal summary
+    selected_names = []
+    for fid in current_deal['selected_friends']:
+        user_data = users.get(int(fid), {})
+        name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}"
+        if user_data.get('username'):
+            name += f" (@{user_data['username']})"
+        selected_names.append(name)
+    
+    summary = (
+        f"Deal Summary:\n"
+        f"Type: {current_deal['type']}\n"
+        f"Amount: {current_deal['amount']}\n"
+        f"Terms: {current_deal['terms']}\n"
+        f"Duration: {current_deal['duration']} days\n\n"
+        f"Recipients:\n" + "\n".join(f"• {name}" for name in selected_names)
+    )
+    
+    bot.send_message(
+        message.chat.id,
+        summary,
+        reply_markup=keyboard
+    )
 
 def main():
     print("DealVault Bot started...")
