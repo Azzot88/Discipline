@@ -163,6 +163,63 @@ def handle_deal_type_selection(message):
             reply_markup=get_deal_types_keyboard()
         )
 
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_AMOUNT)
+def handle_amount_entry(message):
+    user_id = message.from_user.id
+    
+    try:
+        amount = float(message.text)
+        if amount <= 0:
+            raise ValueError
+            
+        users[user_id]['current_deal']['amount'] = amount
+        user_states[user_id] = State.ENTERING_TERMS
+        
+        bot.send_message(
+            message.chat.id,
+            "Please enter the terms of your deal:",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+    except ValueError:
+        bot.send_message(
+            message.chat.id,
+            "Please enter a valid amount (number greater than 0)."
+        )
+
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_TERMS)
+def handle_terms_entry(message):
+    user_id = message.from_user.id
+    
+    # Store terms and move to duration state
+    users[user_id]['current_deal']['terms'] = message.text
+    user_states[user_id] = State.ENTERING_DURATION
+    
+    bot.send_message(
+        message.chat.id,
+        "Please enter the duration of the deal in days:",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_DURATION)
+def handle_duration_entry(message):
+    user_id = message.from_user.id
+    
+    try:
+        duration = int(message.text)
+        if duration <= 0:
+            raise ValueError
+            
+        users[user_id]['current_deal']['duration'] = duration
+        user_states[user_id] = State.SELECTING_FRIENDS
+        
+        start_friend_selection(message)
+        
+    except ValueError:
+        bot.send_message(
+            message.chat.id,
+            "Please enter a valid number of days (positive integer)."
+        )
+
 @bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.SELECTING_FRIENDS)
 def start_friend_selection(message):
     user_id = message.from_user.id
@@ -405,28 +462,14 @@ def handle_friend_confirmation(call):
         reply_markup=get_main_menu()
     )
 
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_AMOUNT)
-def handle_amount_entry(message):
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.IN_CHAT)
+def handle_chat_message(message):
     user_id = message.from_user.id
+    current_deal = users[user_id]['current_deal']
     
-    try:
-        amount = float(message.text)
-        if amount <= 0:
-            raise ValueError
-            
-        users[user_id]['current_deal']['amount'] = amount
-        user_states[user_id] = State.ENTERING_TERMS
-        
-        bot.send_message(
-            message.chat.id,
-            "Please enter the terms of your deal:",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    except ValueError:
-        bot.send_message(
-            message.chat.id,
-            "Please enter a valid amount (number greater than 0)."
-        )
+    if current_deal and 'chat_with' in current_deal:
+        other_user_id = current_deal['chat_with']
+        bot.forward_message(other_user_id, message.chat.id, message.message_id)
 
 def main():
     print("DealVault Bot started...")
