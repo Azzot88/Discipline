@@ -3,13 +3,16 @@ from telebot import types
 from dotenv import load_dotenv
 import os
 from datetime import datetime
+from telebot.handler_backends import State, StatesGroup
+from telebot.storage import StateMemoryStorage
 
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
 # Initialize bot
-bot = telebot.TeleBot(TOKEN)
+state_storage = StateMemoryStorage()
+bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
 
 # Data storage
 deals = {}
@@ -33,6 +36,8 @@ class State:
     ENTERING_DURATION = 'entering_duration'
     SELECTING_FRIENDS = 'selecting_friends'
     IN_CHAT = 'in_chat'
+    SEARCHING_USERNAME = 'searching_username'
+    SEARCHING_PHONE = 'searching_phone'
 
 def get_main_menu():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -52,6 +57,16 @@ def get_deal_types_keyboard():
         types.KeyboardButton('💰 Debt'),
         types.KeyboardButton('🔧 Service'),
         types.KeyboardButton('💡 Venture')
+    ]
+    keyboard.add(*buttons)
+    return keyboard
+
+def get_user_search_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    buttons = [
+        types.KeyboardButton('🔍 Search by Username'),
+        types.KeyboardButton('📱 Search by Phone'),
+        types.KeyboardButton('↩️ Back to Main Menu')
     ]
     keyboard.add(*buttons)
     return keyboard
@@ -148,21 +163,157 @@ def handle_deal_type_selection(message):
             reply_markup=get_deal_types_keyboard()
         )
 
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.SELECTING_FRIENDS)
+def start_friend_selection(message):
+    user_id = message.from_user.id
+    users[user_id]['current_deal']['selected_friends'] = set()
+    
+    bot.send_message(
+        message.chat.id,
+        "How would you like to find users?",
+        reply_markup=get_user_search_keyboard()
+    )
+
+@bot.message_handler(func=lambda message: message.text == '🔍 Search by Username')
+def search_by_username(message):
+    user_id = message.from_user.id
+    user_states[user_id] = State.SEARCHING_USERNAME
+    
+    bot.send_message(
+        message.chat.id,
+        "Please enter the username to search (without @ symbol):",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+
+@bot.message_handler(func=lambda message: message.text == '📱 Search by Phone')
+def search_by_phone(message):
+    user_id = message.from_user.id
+    user_states[user_id] = State.SEARCHING_PHONE
+    
+    bot.send_message(
+        message.chat.id,
+        "Please enter the phone number to search (with country code):",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.SEARCHING_USERNAME)
+def handle_username_search(message):
+    user_id = message.from_user.id
+    search_username = message.text.lower().strip()
+    
+    # Search in users dictionary
+    found_users = []
+    for uid, user_data in users.items():
+        if (user_data.get('username', '').lower() == search_username and 
+            uid != user_id and 
+            user_data.get('is_registered')):
+            found_users.append((uid, user_data))
+    
+    show_search_results(message.chat.id, found_users)
+
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.SEARCHING_PHONE)
+def handle_phone_search(message):
+    user_id = message.from_user.id
+    search_phone = message.text.strip().replace('+', '')
+    
+    # Search in users dictionary
+    found_users = []
+    for uid, user_data in users.items():
+        if (user_data.get('phone', '').replace('+', '') == search_phone and 
+            uid != user_id and 
+            user_data.get('is_registered')):
+            found_users.append((uid, user_data))
+    
+    show_search_results(message.chat.id, found_users)
+
+def show_search_results(chat_id, found_users):
+    if not found_users:
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(
+            types.InlineKeyboardButton("🔄 Search Again", callback_data="search_again"),
+            types.InlineKeyboardButton("✅ Done Selecting", callback_data="confirm_friends")
+        )
+        
+        bot.send_message(
+            chat_id,
+            "No users found. Try searching again or finish selection.",
+            reply_markup=keyboard
+        )
+        return
+
+    # Create inline keyboard with found users
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    
+    for uid, user_data in found_users:
+        user_name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}"
+        if user_data.get('username'):
+            user_name += f" (@{user_data['username']})"
+        
+        keyboard.add(types.InlineKeyboardButton(
+            text=user_name,
+            callback_data=f"select_friend_{uid}"
+        ))
+    
+    keyboard.add(
+        types.InlineKeyboardButton("🔄 Search Again", callback_data="search_again"),
+        types.InlineKeyboardButton("✅ Done Selecting", callback_data="confirm_friends")
+    )
+    
+    bot.send_message(
+        chat_id,
+        "Found users:\nClick to select/unselect users for your deal:",
+        reply_markup=keyboard
+    )
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = call.from_user.id
     
-    if call.data.startswith('select_friend_'):
+    if call.data == "search_again":
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        bot.send_message(
+            call.message.chat.id,
+            "How would you like to find users?",
+            reply_markup=get_user_search_keyboard()
+        )
+        
+    elif call.data.startswith('select_friend_'):
         friend_id = call.data.split('_')[2]
         current_deal = users[user_id]['current_deal']
+        
         if 'selected_friends' not in current_deal:
             current_deal['selected_friends'] = set()
-        current_deal['selected_friends'].add(friend_id)
+            
+        if friend_id in current_deal['selected_friends']:
+            current_deal['selected_friends'].remove(friend_id)
+            bot.answer_callback_query(call.id, "User removed from selection!")
+        else:
+            current_deal['selected_friends'].add(friend_id)
+            bot.answer_callback_query(call.id, "User added to selection!")
         
-        bot.answer_callback_query(
-            call.id,
-            text="User selected!"
-        )
+        # Update the message to show current selection
+        selected_names = []
+        for fid in current_deal['selected_friends']:
+            user_data = users.get(int(fid), {})
+            name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}"
+            if user_data.get('username'):
+                name += f" (@{user_data['username']})"
+            selected_names.append(name)
+        
+        selection_text = "Currently selected users:\n" + "\n".join(
+            f"• {name}" for name in selected_names
+        ) if selected_names else "No users selected"
+        
+        try:
+            bot.edit_message_text(
+                selection_text,
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=call.message.reply_markup
+            )
+        except telebot.apihelper.ApiException:
+            # Message is not modified, ignore the error
+            pass
     
     elif call.data == 'confirm_friends':
         handle_friend_confirmation(call)
