@@ -105,12 +105,24 @@ def handle_contact(message):
     current_state = user_states.get(user_id)
     
     if message.contact is not None:
+        # Standardize phone number format (remove '+' and spaces)
+        contact_phone = message.contact.phone_number.replace('+', '').replace(' ', '')
+        
         if current_state == State.SHARING_CONTACT:
             # Handle initial registration
-            users[user_id]['phone'] = message.contact.phone_number
-            users[user_id]['is_registered'] = True
-            users[user_id]['first_name'] = message.contact.first_name
-            users[user_id]['last_name'] = message.contact.last_name
+            users[user_id] = {
+                'username': message.from_user.username,
+                'phone': contact_phone,  # Store standardized phone
+                'is_registered': True,
+                'first_name': message.contact.first_name,
+                'last_name': message.contact.last_name,
+                'reputation': 0,
+                'completed_deals': 0,
+                'current_deal': None,
+                'role': None
+            }
+            
+            print(f"User registered: {user_id} with phone: {contact_phone}")  # Debug log
             
             bot.send_message(
                 message.chat.id,
@@ -122,12 +134,18 @@ def handle_contact(message):
             
         elif current_state == State.CONTACT_SELECTION:
             # Handle friend selection
-            contact = message.contact
+            print(f"Searching for contact: {contact_phone}")  # Debug log
             found_user = None
             
-            # Search for user by phone number
+            # Debug print registered users
+            print("Registered users:")
             for uid, user_data in users.items():
-                if (user_data.get('phone') == contact.phone_number and 
+                print(f"User {uid}: {user_data.get('phone')}")
+            
+            # Search for user by phone number (standardized comparison)
+            for uid, user_data in users.items():
+                stored_phone = user_data.get('phone', '').replace('+', '').replace(' ', '')
+                if (stored_phone == contact_phone and 
                     uid != user_id and 
                     user_data.get('is_registered')):
                     found_user = (uid, user_data)
@@ -169,9 +187,10 @@ def handle_contact(message):
                     reply_markup=keyboard
                 )
             else:
+                print(f"Contact not found: {contact_phone}")  # Debug log
                 bot.send_message(
                     message.chat.id,
-                    "This contact is not registered in our system. Please select another contact.",
+                    "This contact is not registered in our system. They need to start the bot first and share their contact information.",
                     reply_markup=message.reply_markup
                 )
 
@@ -454,20 +473,61 @@ def handle_deal_response(call):
     deal_id = call.data.split('_')[2]
     
     if call.data.startswith('accept_deal'):
-        users[user_id]['role'] = 'Savior'
-        deals[deal_id]['savior_id'] = user_id
+        users[user_id]['role'] = 'Giver'
+        deals[deal_id]['giver_id'] = user_id
         deals[deal_id]['status'] = 'accepted'
         
-        # Notify the Initiator
+        # Get initiator info
         initiator_id = deals[deal_id]['creator_id']
-        bot.send_message(
-            initiator_id,
-            f"🎉 Good news! A Savior has accepted your deal!\n"
-            f"Deal ID: {deal_id}"
+        initiator = users[initiator_id]
+        giver = users[user_id]
+        
+        # Create chat messages for both users
+        chat_info = (
+            f"🤝 Deal Chat Established!\n\n"
+            f"Deal ID: {deal_id}\n"
+            f"Type: {deals[deal_id]['type']}\n"
+            f"Amount: {deals[deal_id]['amount']}\n"
+            f"Terms: {deals[deal_id]['terms']}\n"
+            f"Duration: {deals[deal_id]['duration']} days\n\n"
+            f"You can now discuss the details here."
         )
         
+        # Create chat keyboard
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+        keyboard.add(
+            types.KeyboardButton('✅ Complete Deal'),
+            types.KeyboardButton('❌ Cancel Deal'),
+            types.KeyboardButton('↩️ Back to Main Menu')
+        )
+        
+        # Notify and setup chat for initiator
+        bot.send_message(
+            initiator_id,
+            f"🎉 Good news! {giver.get('first_name')} has accepted your deal!\n\n" + chat_info,
+            reply_markup=keyboard
+        )
+        users[initiator_id]['current_chat'] = {
+            'deal_id': deal_id,
+            'chat_with': user_id
+        }
+        user_states[initiator_id] = State.IN_CHAT
+        
+        # Setup chat for giver
+        bot.send_message(
+            user_id,
+            f"You've accepted the deal with {initiator.get('first_name')}!\n\n" + chat_info,
+            reply_markup=keyboard
+        )
+        users[user_id]['current_chat'] = {
+            'deal_id': deal_id,
+            'chat_with': initiator_id
+        }
+        user_states[user_id] = State.IN_CHAT
+        
+        # Edit original message
         bot.edit_message_text(
-            "You've accepted the deal as a Savior! 🤝",
+            "You've accepted the deal! 🤝\nCheck the new message to start chatting.",
             call.message.chat.id,
             call.message.message_id
         )
@@ -490,57 +550,146 @@ def handle_friend_confirmation(call):
         'amount': current_deal['amount'],
         'terms': current_deal['terms'],
         'duration': current_deal['duration'],
-        'status': 'pending',
+        'status': 'active',
         'type': current_deal['type'],
         'invited_users': list(current_deal['selected_friends'])
     }
     
-    # Send invitations to selected users
-    creator_name = f"{users[user_id].get('first_name', '')} {users[user_id].get('last_name', '')}".strip()
-    if users[user_id].get('username'):
-        creator_name += f" (@{users[user_id]['username']})"
+    # Get initiator info
+    initiator = users[user_id]
+    initiator['role'] = 'Initiator'
     
-    for friend_id in current_deal['selected_friends']:
-        keyboard = types.InlineKeyboardMarkup()
-        keyboard.add(types.InlineKeyboardButton(
-            text="Accept Deal",
-            callback_data=f"accept_deal_{deal_id}"
-        ))
+    # Create chat for each selected user
+    for giver_id in current_deal['selected_friends']:
+        giver = users[int(giver_id)]
+        giver['role'] = 'Giver'
         
-        try:
-            bot.send_message(
-                int(friend_id),
-                f"New {current_deal['type']} deal received from {creator_name}!\n"
-                f"Amount: {current_deal['amount']}\n"
-                f"Terms: {current_deal['terms']}\n"
-                f"Duration: {current_deal['duration']} days",
-                reply_markup=keyboard
-            )
-        except Exception as e:
-            print(f"Failed to send message to user {friend_id}: {e}")
+        # Create chat info message
+        chat_info = (
+            f"🤝 New Deal Chat\n\n"
+            f"Deal ID: {deal_id}\n"
+            f"Type: {current_deal['type']}\n"
+            f"Amount: {current_deal['amount']}\n"
+            f"Terms: {current_deal['terms']}\n"
+            f"Duration: {current_deal['duration']} days\n\n"
+            f"You can start discussing the details here."
+        )
+        
+        # Create chat keyboard
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+        keyboard.add(
+            types.KeyboardButton('✅ Complete Deal'),
+            types.KeyboardButton('❌ Cancel Deal'),
+            types.KeyboardButton('↩️ Back to Main Menu')
+        )
+        
+        # Setup chat for initiator
+        bot.send_message(
+            user_id,
+            f"🎉 Deal chat established with {giver.get('first_name')}!\n\n" + chat_info,
+            reply_markup=keyboard
+        )
+        users[user_id]['current_chat'] = {
+            'deal_id': deal_id,
+            'chat_with': int(giver_id)
+        }
+        user_states[user_id] = State.IN_CHAT
+        
+        # Setup chat for giver
+        bot.send_message(
+            int(giver_id),
+            f"🔔 New deal from {initiator.get('first_name')}!\n\n" + chat_info,
+            reply_markup=keyboard
+        )
+        users[int(giver_id)]['current_chat'] = {
+            'deal_id': deal_id,
+            'chat_with': user_id
+        }
+        user_states[int(giver_id)] = State.IN_CHAT
     
     users[user_id]['current_deal'] = None
-    user_states[user_id] = State.IDLE
-    
     bot.edit_message_text(
-        "Deal sent to selected users!",
+        "Deal chat(s) established! Check your new messages.",
         call.message.chat.id,
         call.message.message_id
     )
-    bot.send_message(
-        call.message.chat.id,
-        "What would you like to do next?",
-        reply_markup=get_main_menu()
-    )
 
+# Update chat message handler
 @bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.IN_CHAT)
 def handle_chat_message(message):
     user_id = message.from_user.id
-    current_deal = users[user_id]['current_deal']
     
-    if current_deal and 'chat_with' in current_deal:
-        other_user_id = current_deal['chat_with']
-        bot.forward_message(other_user_id, message.chat.id, message.message_id)
+    if message.text in ['✅ Complete Deal', '❌ Cancel Deal', '↩️ Back to Main Menu']:
+        handle_chat_action(message)
+        return
+        
+    current_chat = users[user_id].get('current_chat')
+    if current_chat and 'chat_with' in current_chat:
+        other_user_id = current_chat['chat_with']
+        deal_id = current_chat['deal_id']
+        
+        # Forward message to other user with sender's name and role
+        sender_name = users[user_id].get('first_name', 'User')
+        sender_role = users[user_id].get('role', '')
+        bot.send_message(
+            other_user_id,
+            f"{sender_name} ({sender_role}): {message.text}"
+        )
+
+def handle_chat_action(message):
+    user_id = message.from_user.id
+    current_chat = users[user_id].get('current_chat')
+    
+    if not current_chat:
+        return
+        
+    deal_id = current_chat.get('deal_id')
+    other_user_id = current_chat.get('chat_with')
+    
+    if message.text == '✅ Complete Deal':
+        deals[deal_id]['status'] = 'completed'
+        
+        # Update user stats
+        users[user_id]['completed_deals'] += 1
+        users[user_id]['reputation'] += 1
+        users[other_user_id]['completed_deals'] += 1
+        users[other_user_id]['reputation'] += 1
+        
+        # Notify both users
+        completion_message = (
+            "🎉 Deal has been marked as completed!\n"
+            "Your reputation has increased! ⭐"
+        )
+        bot.send_message(user_id, completion_message, reply_markup=get_main_menu())
+        bot.send_message(other_user_id, completion_message, reply_markup=get_main_menu())
+        
+        # Reset states
+        user_states[user_id] = State.IDLE
+        user_states[other_user_id] = State.IDLE
+        users[user_id]['current_chat'] = None
+        users[other_user_id]['current_chat'] = None
+        
+    elif message.text == '❌ Cancel Deal':
+        deals[deal_id]['status'] = 'cancelled'
+        
+        # Notify both users
+        cancel_message = "❌ Deal has been cancelled."
+        bot.send_message(user_id, cancel_message, reply_markup=get_main_menu())
+        bot.send_message(other_user_id, cancel_message, reply_markup=get_main_menu())
+        
+        # Reset states
+        user_states[user_id] = State.IDLE
+        user_states[other_user_id] = State.IDLE
+        users[user_id]['current_chat'] = None
+        users[other_user_id]['current_chat'] = None
+        
+    elif message.text == '↩️ Back to Main Menu':
+        bot.send_message(
+            message.chat.id,
+            "Returning to main menu. You can come back to the chat anytime.",
+            reply_markup=get_main_menu()
+        )
+        user_states[user_id] = State.IDLE
 
 # Add handler for continuing with selected friends
 @bot.message_handler(func=lambda message: message.text == '✅ Continue with Selected')
