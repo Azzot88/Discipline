@@ -1,56 +1,39 @@
-import time
-import sys
-import os
+import asyncio
 import logging
-from datetime import datetime
-from config import bot
-import handlers
-from deal_manager import *
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+from dotenv import load_dotenv
+import os
 
-# Create log directory in user's directory
-log_dir = "/home/ubuntu/Discipline/logs"
-os.makedirs(log_dir, exist_ok=True)
+from handlers import router
+from middlewares import RegisterCheck
 
-# Setup logging with correct path
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'{log_dir}/claude-bot.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def check_token():
-    from config import TELEGRAM_BOT_TOKEN
-    logger.info(f"Token length: {len(TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else 0}")
-    logger.info(f"Token format: {'valid' if ':' in TELEGRAM_BOT_TOKEN else 'invalid'}")
-    if not TELEGRAM_BOT_TOKEN or ':' not in TELEGRAM_BOT_TOKEN:
-        logger.error("Invalid token format!")
-        return False
-    return True
+# Load environment variables
+load_dotenv()
 
-def main():
-    logger.info("DealVault Bot starting...")
-    while True:
-        try:
-            logger.info("Bot is running and polling for updates...")
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            logger.error(f"Bot crashed with error: {e}")
-            logger.info("Restarting bot in 5 seconds...")
-            time.sleep(5)
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
-            break
+async def main():
+    # Initialize bot and dispatcher
+    bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
+    
+    # Initialize storage
+    storage = MemoryStorage()
+    
+    # Initialize dispatcher
+    dp = Dispatcher(storage=storage)
+    
+    # Add middlewares
+    dp.message.middleware(RegisterCheck())
+    
+    # Include routers
+    dp.include_router(router)
+    
+    # Start polling
+    logger.info("Starting bot...")
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-    finally:
-        logger.info("Bot shutdown")
+if __name__ == '__main__':
+    asyncio.run(main())

@@ -1,40 +1,42 @@
-import os
-from dotenv import load_dotenv
-import telebot
-from telebot.handler_backends import State as TeleState
-from telebot import types
-from telebot.storage import StateMemoryStorage
+from dataclasses import dataclass
+from enum import Enum
 
-# Load environment variables
-load_dotenv()
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-
-# Initialize bot
-state_storage = StateMemoryStorage()
-bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
-
-# Data storage
-deals = {}
-users = {}
-user_states = {}
-
-# States
-class State:
-    IDLE = 'idle'
-    SHARING_CONTACT = 'sharing_contact'
-    SELECTING_DEAL_TYPE = 'selecting_deal_type'
-    ENTERING_AMOUNT = 'entering_amount'
-    ENTERING_TERMS = 'entering_terms'
-    ENTERING_DURATION = 'entering_duration'
-    SELECTING_FRIENDS = 'selecting_friends'
-    IN_CHAT = 'in_chat'
-    CONTACT_SELECTION = 'contact_selection'
-    SEARCHING_USERNAME = 'searching_username'
-    SEARCHING_PHONE = 'searching_phone'
-
-# Deal Types
-class DealType:
+class DealType(str, Enum):
     CHARITY = 'charity'
     DEBT = 'debt'
     SERVICE = 'service'
     VENTURE = 'venture'
+
+class UserState(str, Enum):
+    IDLE = 'idle'
+    SHARING_CONTACT = 'sharing_contact'
+    ENTERING_AMOUNT = 'entering_amount'
+    ENTERING_TERMS = 'entering_terms'
+
+@dataclass
+class User:
+    id: int
+    username: str = None
+    phone: str = None
+    first_name: str = None
+    last_name: str = None
+    reputation: int = 0
+    completed_deals: int = 0
+    is_registered: bool = False
+
+@dataclass
+class Deal:
+    id: str
+    creator_id: int
+    deal_type: DealType
+    amount: float
+    terms: str
+    status: str = 'active'
+    group_id: int = None
+    members: list = None
+
+# Storage (can be replaced with database later)
+users = {}
+deals = {}
+user_states = {}
+temp_deals = {}

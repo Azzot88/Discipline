@@ -1,200 +1,128 @@
-from config import bot, users, user_states, deals, State, DealType
-from keyboards import *
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.enums import ChatType
+
+from config import users, deals, DealType, User
+from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard
 from deal_manager import create_deal_group, setup_deal_chat, complete_deal
-import logging
 
-logger = logging.getLogger(__name__)
+router = Router()
 
-# Store temporary deal data
-temp_deals = {}
+class DealStates(StatesGroup):
+    entering_amount = State()
+    entering_terms = State()
 
-@bot.message_handler(commands=['start'])
-def start_command(message):
+@router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id not in users:
-        users[user_id] = {
-            'username': message.from_user.username,
-            'reputation': 0,
-            'completed_deals': 0,
-            'current_deal': None,
-            'phone': None,
-            'is_registered': False,
-            'role': None
-        }
+        users[user_id] = User(id=user_id, username=message.from_user.username)
     
-    if message.chat.type == 'private':
-        user_states[user_id] = State.SHARING_CONTACT
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.add(types.KeyboardButton('📱 Share Contact', request_contact=True))
-        
-        bot.send_message(
-            message.chat.id,
+    if message.chat.type == ChatType.PRIVATE:
+        await state.clear()  # Clear any previous states
+        await message.answer(
             "Welcome to DealVault Bot! 🎉\n\n"
             "To get started, please share your contact information.",
-            reply_markup=keyboard
+            reply_markup=get_contact_keyboard()
         )
 
-@bot.message_handler(commands=['create_deal_group'])
-def create_deal_group_command(message):
-    user_id = message.from_user.id
-    
-    if not users.get(user_id, {}).get('is_registered'):
-        bot.reply_to(
-            message,
-            "Please start private chat with me first and share your contact information.",
-            reply_markup=types.InlineKeyboardMarkup().add(
-                types.InlineKeyboardButton("Start Private Chat", url=f"https://t.me/{bot.get_me().username}")
-            )
-        )
+@router.message(Command('create_deal_group'))
+async def cmd_create_deal(message: Message, state: FSMContext):
+    if message.chat.type != ChatType.PRIVATE:
         return
     
-    # Create inline keyboard for deal type selection
-    keyboard = types.InlineKeyboardMarkup(row_width=2)
-    buttons = [
-        types.InlineKeyboardButton("🤲 Charity", callback_data="create_charity"),
-        types.InlineKeyboardButton("💰 Debt", callback_data="create_debt"),
-        types.InlineKeyboardButton("🔧 Service", callback_data="create_service"),
-        types.InlineKeyboardButton("💡 Venture", callback_data="create_venture")
-    ]
-    keyboard.add(*buttons)
-    
-    bot.reply_to(
-        message,
+    await state.clear()  # Clear any previous states
+    await message.answer(
         "Please select the type of deal you want to create:",
-        reply_markup=keyboard
+        reply_markup=get_deal_types_keyboard()
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('create_'))
-def handle_deal_type_selection(call):
-    user_id = call.from_user.id
-    deal_type = call.data.replace('create_', '')
+@router.callback_query(F.data.startswith('create_'))
+async def process_deal_type(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # Acknowledge the callback
     
-    # Store temporary deal info
-    temp_deals[user_id] = {
-        'type': deal_type,
-        'creator_id': user_id,
-        'status': 'pending'
-    }
+    deal_type = callback.data.replace('create_', '')
     
-    # Ask for amount
-    user_states[user_id] = State.ENTERING_AMOUNT
-    bot.edit_message_text(
+    await state.update_data(deal_type=deal_type)
+    await state.set_state(DealStates.entering_amount)
+    
+    await callback.message.edit_text(
         "Please enter the deal amount:",
-        call.message.chat.id,
-        call.message.message_id
+        reply_markup=None  # Remove inline keyboard
     )
 
-@bot.message_handler(content_types=['new_chat_members'])
-def handle_new_member(message):
-    for new_member in message.new_chat_members:
-        if new_member.id == bot.get_me().id:
-            # Bot was added to group
-            bot.send_message(
-                message.chat.id,
-                "Thanks for adding me! This group will be used for deal communication.\n"
-                "All members should start a private chat with me and share their contact information."
-            )
-        else:
-            # New user joined
-            if new_member.id not in users or not users[new_member.id].get('is_registered'):
-                keyboard = types.InlineKeyboardMarkup()
-                keyboard.add(
-                    types.InlineKeyboardButton(
-                        "Share Contact (Private Chat)",
-                        url=f"https://t.me/{bot.get_me().username}?start=register"
-                    )
-                )
-                bot.send_message(
-                    message.chat.id,
-                    f"Welcome {new_member.first_name}! Please share your contact information "
-                    f"by starting a private chat with me.",
-                    reply_markup=keyboard
-                )
-
-@bot.message_handler(content_types=['contact'])
-def handle_contact(message):
-    user_id = message.from_user.id
-    if message.contact is not None:
-        users[user_id]['phone'] = message.contact.phone_number
-        users[user_id]['is_registered'] = True
-        users[user_id]['first_name'] = message.contact.first_name
-        users[user_id]['last_name'] = message.contact.last_name
-        
-        if message.chat.type == 'private':
-            bot.send_message(
-                message.chat.id,
-                "Thanks for registering! You can now participate in deals.\n"
-                "Use /create_deal_group to create a new deal.",
-                reply_markup=get_main_menu()
-            )
-        user_states[user_id] = State.IDLE
-
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_AMOUNT)
-def handle_amount(message):
-    user_id = message.from_user.id
+@router.message(DealStates.entering_amount)
+async def process_amount(message: Message, state: FSMContext):
     try:
         amount = float(message.text)
         if amount <= 0:
             raise ValueError
         
-        temp_deals[user_id]['amount'] = amount
-        user_states[user_id] = State.ENTERING_TERMS
+        await state.update_data(amount=amount)
+        await state.set_state(DealStates.entering_terms)
         
-        bot.reply_to(message, "Please enter the deal terms:")
+        await message.answer("Please enter the deal terms:")
     except ValueError:
-        bot.reply_to(message, "Please enter a valid positive number.")
+        await message.answer("Please enter a valid positive number.")
 
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_TERMS)
-def handle_terms(message):
-    user_id = message.from_user.id
-    temp_deals[user_id]['terms'] = message.text
-    
-    # Create the deal
-    deal_id = create_deal_group(
-        user_id,
-        temp_deals[user_id]['type'],
-        temp_deals[user_id]['amount'],
-        temp_deals[user_id]['terms']
+@router.message(DealStates.entering_terms)
+async def process_terms(message: Message, state: FSMContext):
+    data = await state.get_data()
+    deal_id = await create_deal_group(
+        message.from_user.id,
+        data['deal_type'],
+        data['amount'],
+        message.text
     )
     
     if deal_id:
-        user_states[user_id] = State.IDLE
-        del temp_deals[user_id]
+        await state.clear()
+        await message.answer(
+            "Deal created successfully! Please create a group and add me there.",
+            reply_markup=get_main_menu()
+        )
     else:
-        bot.reply_to(message, "Error creating deal. Please try again.")
+        await message.answer("Error creating deal. Please try again.")
 
-@bot.message_handler(func=lambda message: message.text.startswith('/setup_deal_'))
-def handle_setup_deal(message):
-    if message.chat.type not in ['group', 'supergroup']:
-        bot.reply_to(message, "This command can only be used in groups.")
-        return
-        
-    deal_id = message.text.replace('/setup_deal_', '')
-    if setup_deal_chat(deal_id, message.chat.id):
-        # Success
-        pass
-    else:
-        bot.reply_to(message, "Invalid deal ID or deal already setup.")
+@router.message(F.content_type.in_({'new_chat_members'}))
+async def on_new_member(message: Message):
+    for member in message.new_chat_members:
+        if member.id == message.bot.id:
+            await message.answer(
+                "Thanks for adding me! This group will be used for deal communication.\n"
+                "All members should start a private chat with me and share their contact information."
+            )
+        else:
+            if member.id not in users or not users[member.id].is_registered:
+                bot_info = await message.bot.get_me()
+                await message.answer(
+                    f"Welcome {member.first_name}! Please share your contact information "
+                    f"by starting a private chat with me.",
+                    reply_markup=get_start_bot_keyboard(bot_info.username)
+                )
 
-@bot.message_handler(commands=['complete_deal'])
-def handle_complete_deal(message):
-    if message.chat.type not in ['group', 'supergroup']:
+@router.message(F.content_type.in_({'contact'}))
+async def handle_contact(message: Message, state: FSMContext):
+    if not message.contact:
         return
         
     user_id = message.from_user.id
-    chat_id = message.chat.id
+    contact = message.contact
     
-    # Find deal by group_id
-    deal = next((d for d in deals.values() if d['group_id'] == chat_id), None)
-    
-    if not deal:
-        bot.reply_to(message, "No active deal found in this group.")
-        return
+    if user_id == contact.user_id:  # Verify the contact belongs to the user
+        users[user_id].phone = contact.phone_number
+        users[user_id].first_name = contact.first_name
+        users[user_id].last_name = contact.last_name
+        users[user_id].is_registered = True
         
-    if user_id not in deal['members']:
-        bot.reply_to(message, "Only deal members can complete the deal.")
-        return
-        
-    complete_deal(deal['id'])
+        await state.clear()
+        await message.answer(
+            "Thanks for registering! You can now participate in deals.\n"
+            "Use /create_deal_group to create a new deal.",
+            reply_markup=get_main_menu()
+        )
 
 # Add other necessary handlers...
