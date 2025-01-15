@@ -7,6 +7,18 @@ logger = logging.getLogger(__name__)
 
 def create_deal_group(creator_id, deal_type, amount, terms):
     try:
+        # Validate inputs
+        if amount <= 0:
+            raise ValueError("Amount must be positive")
+        if not terms.strip():
+            raise ValueError("Terms cannot be empty")
+            
+        # Check user's active deals
+        active_deals = sum(1 for d in deals.values() 
+                         if d['creator_id'] == creator_id and d['status'] == 'active')
+        if active_deals >= 5:  # Limit active deals
+            raise ValueError("You have too many active deals")
+            
         # Generate unique deal ID
         deal_id = f"deal_{datetime.now().strftime('%Y%m%d%H%M%S')}_{creator_id}"
         
@@ -35,6 +47,9 @@ def create_deal_group(creator_id, deal_type, amount, terms):
         bot.send_message(creator_id, instructions)
         return deal_id
         
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error creating deal group: {e}")
         return None
@@ -75,3 +90,16 @@ def complete_deal(deal_id):
                 deal['group_id'],
                 "🎉 Deal has been completed! Everyone's reputation has been updated."
             )
+
+def check_deal_timeouts():
+    current_time = datetime.now()
+    for deal_id, deal in deals.items():
+        if deal['status'] == 'active':
+            time_diff = current_time - deal['created_at']
+            if time_diff.days > 30:  # 30 days timeout
+                deal['status'] = 'expired'
+                if deal['group_id']:
+                    bot.send_message(
+                        deal['group_id'],
+                        "⚠️ This deal has expired due to inactivity."
+                    )

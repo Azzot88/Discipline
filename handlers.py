@@ -129,4 +129,72 @@ def handle_contact(message):
             )
         user_states[user_id] = State.IDLE
 
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_AMOUNT)
+def handle_amount(message):
+    user_id = message.from_user.id
+    try:
+        amount = float(message.text)
+        if amount <= 0:
+            raise ValueError
+        
+        temp_deals[user_id]['amount'] = amount
+        user_states[user_id] = State.ENTERING_TERMS
+        
+        bot.reply_to(message, "Please enter the deal terms:")
+    except ValueError:
+        bot.reply_to(message, "Please enter a valid positive number.")
+
+@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.ENTERING_TERMS)
+def handle_terms(message):
+    user_id = message.from_user.id
+    temp_deals[user_id]['terms'] = message.text
+    
+    # Create the deal
+    deal_id = create_deal_group(
+        user_id,
+        temp_deals[user_id]['type'],
+        temp_deals[user_id]['amount'],
+        temp_deals[user_id]['terms']
+    )
+    
+    if deal_id:
+        user_states[user_id] = State.IDLE
+        del temp_deals[user_id]
+    else:
+        bot.reply_to(message, "Error creating deal. Please try again.")
+
+@bot.message_handler(func=lambda message: message.text.startswith('/setup_deal_'))
+def handle_setup_deal(message):
+    if message.chat.type not in ['group', 'supergroup']:
+        bot.reply_to(message, "This command can only be used in groups.")
+        return
+        
+    deal_id = message.text.replace('/setup_deal_', '')
+    if setup_deal_chat(deal_id, message.chat.id):
+        # Success
+        pass
+    else:
+        bot.reply_to(message, "Invalid deal ID or deal already setup.")
+
+@bot.message_handler(commands=['complete_deal'])
+def handle_complete_deal(message):
+    if message.chat.type not in ['group', 'supergroup']:
+        return
+        
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Find deal by group_id
+    deal = next((d for d in deals.values() if d['group_id'] == chat_id), None)
+    
+    if not deal:
+        bot.reply_to(message, "No active deal found in this group.")
+        return
+        
+    if user_id not in deal['members']:
+        bot.reply_to(message, "Only deal members can complete the deal.")
+        return
+        
+    complete_deal(deal['id'])
+
 # Add other necessary handlers...
