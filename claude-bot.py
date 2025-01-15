@@ -16,6 +16,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def check_token():
+    from config import TOKEN
+    logger.info(f"Token length: {len(TOKEN) if TOKEN else 0}")
+    logger.info(f"Token format: {'valid' if ':' in TOKEN else 'invalid'}")
+    if not TOKEN or ':' not in TOKEN:
+        logger.error("Invalid token format!")
+        return False
+    return True
+
 def main():
     logger.info("DealVault Bot starting...")
     while True:
