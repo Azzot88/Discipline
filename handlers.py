@@ -1,7 +1,12 @@
 from config import bot, users, user_states, deals, State, DealType
 from keyboards import *
-from deal_manager import create_new_deal, setup_deal_chat, complete_deal
-from datetime import datetime
+from deal_manager import create_deal_group, setup_deal_chat, complete_deal
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Store temporary deal data
+temp_deals = {}
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
@@ -16,17 +21,95 @@ def start_command(message):
             'is_registered': False,
             'role': None
         }
-    user_states[user_id] = State.SHARING_CONTACT
     
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton('📱 Share Contact', request_contact=True))
+    if message.chat.type == 'private':
+        user_states[user_id] = State.SHARING_CONTACT
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(types.KeyboardButton('📱 Share Contact', request_contact=True))
+        
+        bot.send_message(
+            message.chat.id,
+            "Welcome to DealVault Bot! 🎉\n\n"
+            "To get started, please share your contact information.",
+            reply_markup=keyboard
+        )
+
+@bot.message_handler(commands=['create_deal_group'])
+def create_deal_group_command(message):
+    user_id = message.from_user.id
     
-    bot.send_message(
-        message.chat.id,
-        "Welcome to DealVault Bot! 🎉\n\n"
-        "To get started, please share your contact information.",
+    if not users.get(user_id, {}).get('is_registered'):
+        bot.reply_to(
+            message,
+            "Please start private chat with me first and share your contact information.",
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("Start Private Chat", url=f"https://t.me/{bot.get_me().username}")
+            )
+        )
+        return
+    
+    # Create inline keyboard for deal type selection
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        types.InlineKeyboardButton("🤲 Charity", callback_data="create_charity"),
+        types.InlineKeyboardButton("💰 Debt", callback_data="create_debt"),
+        types.InlineKeyboardButton("🔧 Service", callback_data="create_service"),
+        types.InlineKeyboardButton("💡 Venture", callback_data="create_venture")
+    ]
+    keyboard.add(*buttons)
+    
+    bot.reply_to(
+        message,
+        "Please select the type of deal you want to create:",
         reply_markup=keyboard
     )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('create_'))
+def handle_deal_type_selection(call):
+    user_id = call.from_user.id
+    deal_type = call.data.replace('create_', '')
+    
+    # Store temporary deal info
+    temp_deals[user_id] = {
+        'type': deal_type,
+        'creator_id': user_id,
+        'status': 'pending'
+    }
+    
+    # Ask for amount
+    user_states[user_id] = State.ENTERING_AMOUNT
+    bot.edit_message_text(
+        "Please enter the deal amount:",
+        call.message.chat.id,
+        call.message.message_id
+    )
+
+@bot.message_handler(content_types=['new_chat_members'])
+def handle_new_member(message):
+    for new_member in message.new_chat_members:
+        if new_member.id == bot.get_me().id:
+            # Bot was added to group
+            bot.send_message(
+                message.chat.id,
+                "Thanks for adding me! This group will be used for deal communication.\n"
+                "All members should start a private chat with me and share their contact information."
+            )
+        else:
+            # New user joined
+            if new_member.id not in users or not users[new_member.id].get('is_registered'):
+                keyboard = types.InlineKeyboardMarkup()
+                keyboard.add(
+                    types.InlineKeyboardButton(
+                        "Share Contact (Private Chat)",
+                        url=f"https://t.me/{bot.get_me().username}?start=register"
+                    )
+                )
+                bot.send_message(
+                    message.chat.id,
+                    f"Welcome {new_member.first_name}! Please share your contact information "
+                    f"by starting a private chat with me.",
+                    reply_markup=keyboard
+                )
 
 @bot.message_handler(content_types=['contact'])
 def handle_contact(message):
@@ -37,104 +120,13 @@ def handle_contact(message):
         users[user_id]['first_name'] = message.contact.first_name
         users[user_id]['last_name'] = message.contact.last_name
         
-        bot.send_message(
-            message.chat.id,
-            "Thanks for registering! You can now use all bot features.",
-            reply_markup=get_main_menu()
-        )
+        if message.chat.type == 'private':
+            bot.send_message(
+                message.chat.id,
+                "Thanks for registering! You can now participate in deals.\n"
+                "Use /create_deal_group to create a new deal.",
+                reply_markup=get_main_menu()
+            )
         user_states[user_id] = State.IDLE
 
-@bot.message_handler(func=lambda message: message.text == '📝 Create Deal')
-def create_deal(message):
-    user_id = message.from_user.id
-    if not users[user_id].get('is_registered'):
-        bot.reply_to(message, "Please register first using /start")
-        return
-    
-    users[user_id]['current_deal'] = {}
-    user_states[user_id] = State.SELECTING_DEAL_TYPE
-    
-    bot.send_message(
-        message.chat.id,
-        "Select deal type:",
-        reply_markup=get_deal_types_keyboard()
-    )
-
-@bot.message_handler(func=lambda message: user_states.get(message.from_user.id) == State.SELECTING_DEAL_TYPE)
-def handle_deal_type(message):
-    user_id = message.from_user.id
-    deal_types = {
-        '🤲 Charity': DealType.CHARITY,
-        '💰 Debt': DealType.DEBT,
-        '🔧 Service': DealType.SERVICE,
-        '💡 Venture': DealType.VENTURE
-    }
-    
-    if message.text in deal_types:
-        users[user_id]['current_deal']['type'] = deal_types[message.text]
-        user_states[user_id] = State.ENTERING_AMOUNT
-        
-        bot.send_message(
-            message.chat.id,
-            "Enter amount:",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    elif message.text == '↩️ Back':
-        user_states[user_id] = State.IDLE
-        bot.send_message(
-            message.chat.id,
-            "Returned to main menu",
-            reply_markup=get_main_menu()
-        )
-
-@bot.message_handler(func=lambda message: message.text == '👥 Active Deals')
-def show_active_deals(message):
-    user_id = message.from_user.id
-    active_deals = [deal for deal in deals.values() if 
-                   (deal['creator_id'] == user_id or user_id in deal['invited_users']) and 
-                   deal['status'] == 'active']
-    
-    if not active_deals:
-        bot.send_message(
-            message.chat.id,
-            "You have no active deals.",
-            reply_markup=get_main_menu()
-        )
-        return
-    
-    for deal in active_deals:
-        deal_text = (
-            f"Deal ID: {deal['id']}\n"
-            f"Type: {deal['type']}\n"
-            f"Amount: {deal['amount']}\n"
-            f"Terms: {deal['terms']}\n"
-            f"Duration: {deal['duration']} days"
-        )
-        bot.send_message(message.chat.id, deal_text)
-
-@bot.message_handler(func=lambda message: message.text == '📊 My Profile')
-def show_profile(message):
-    user_id = message.from_user.id
-    user = users[user_id]
-    
-    profile_text = (
-        f"👤 Profile\n\n"
-        f"Username: @{user['username']}\n"
-        f"Reputation: ⭐ {user['reputation']}\n"
-        f"Completed Deals: 🤝 {user['completed_deals']}"
-    )
-    
-    bot.send_message(
-        message.chat.id,
-        profile_text,
-        reply_markup=get_main_menu()
-    )
-
-def safe_send_message(chat_id, text, **kwargs):
-    try:
-        return bot.send_message(chat_id, text, **kwargs)
-    except Exception as e:
-        print(f"Error sending message: {e}")
-        # Handle error appropriately
-
-# ... (other handlers from original code)
+# Add other necessary handlers...
