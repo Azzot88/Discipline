@@ -1,50 +1,41 @@
-import os
-from dotenv import load_dotenv
-import telebot
-from telebot.handler_backends import State, StatesGroup
-from telebot.storage import StateMemoryStorage
 import time
+import sys
+import logging
+from config import bot
+import handlers
+from deal_manager import *
 
-# Load environment variables
-load_dotenv()
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-
-# Initialize bot
-state_storage = StateMemoryStorage()
-bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
-
-# Data storage
-deals = {}
-users = {}
-user_states = {}
-
-# States
-class State:
-    IDLE = 'idle'
-    SHARING_CONTACT = 'sharing_contact'
-    SELECTING_DEAL_TYPE = 'selecting_deal_type'
-    ENTERING_AMOUNT = 'entering_amount'
-    ENTERING_TERMS = 'entering_terms'
-    ENTERING_DURATION = 'entering_duration'
-    SELECTING_FRIENDS = 'selecting_friends'
-    IN_CHAT = 'in_chat'
-    CONTACT_SELECTION = 'contact_selection'
-    SEARCHING_USERNAME = 'searching_username'
-    SEARCHING_PHONE = 'searching_phone'
-
-# Deal Types
-class DealType:
-    CHARITY = 'charity'
-    DEBT = 'debt'
-    SERVICE = 'service'
-    VENTURE = 'venture'
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/var/log/claude-bot.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 def main():
-    print("DealVault Bot started...")
+    logger.info("DealVault Bot starting...")
     while True:
         try:
-            bot.infinity_polling()
+            logger.info("Bot is running and polling for updates...")
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
         except Exception as e:
-            print(f"Bot crashed with error: {e}")
-            print("Restarting bot in 5 seconds...")
+            logger.error(f"Bot crashed with error: {e}")
+            logger.info("Restarting bot in 5 seconds...")
             time.sleep(5)
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user")
+            break
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+    finally:
+        logger.info("Bot shutdown")
