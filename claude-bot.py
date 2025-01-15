@@ -17,10 +17,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def check_token():
-    from config import TOKEN
-    logger.info(f"Token length: {len(TOKEN) if TOKEN else 0}")
-    logger.info(f"Token format: {'valid' if ':' in TOKEN else 'invalid'}")
-    if not TOKEN or ':' not in TOKEN:
+    from config import TELEGRAM_BOT_TOKEN
+    logger.info(f"Token length: {len(TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else 0}")
+    logger.info(f"Token format: {'valid' if ':' in TELEGRAM_BOT_TOKEN else 'invalid'}")
+    if not TELEGRAM_BOT_TOKEN or ':' not in TELEGRAM_BOT_TOKEN:
         logger.error("Invalid token format!")
         return False
     return True
