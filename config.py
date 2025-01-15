@@ -1,9 +1,9 @@
 import os
 from dotenv import load_dotenv
 import telebot
-from telebot.handler_backends import State, StatesGroup
+from telebot.handler_backends import State as TeleState
+from telebot import types
 from telebot.storage import StateMemoryStorage
-import time
 
 # Load environment variables
 load_dotenv()
@@ -38,13 +38,3 @@ class DealType:
     DEBT = 'debt'
     SERVICE = 'service'
     VENTURE = 'venture'
-
-def main():
-    print("DealVault Bot started...")
-    while True:
-        try:
-            bot.infinity_polling()
-        except Exception as e:
-            print(f"Bot crashed with error: {e}")
-            print("Restarting bot in 5 seconds...")
-            time.sleep(5)
