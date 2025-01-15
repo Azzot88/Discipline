@@ -1,16 +1,22 @@
 import time
 import sys
+import os
 import logging
+from datetime import datetime
 from config import bot
 import handlers
 from deal_manager import *
 
-# Setup logging
+# Create log directory in user's directory
+log_dir = "/home/ubuntu/Discipline/logs"
+os.makedirs(log_dir, exist_ok=True)
+
+# Setup logging with correct path
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/var/log/claude-bot.log'),
+        logging.FileHandler(f'{log_dir}/claude-bot.log'),
         logging.StreamHandler(sys.stdout)
     ]
 )
