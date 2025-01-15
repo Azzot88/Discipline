@@ -39,6 +39,9 @@ class State:
     SEARCHING_USERNAME = 'searching_username'
     SEARCHING_PHONE = 'searching_phone'
     CONTACT_SELECTION = 'contact_selection'
+    CREATING_DEAL_GROUP = 'creating_deal_group'
+    WAITING_FOR_MEMBERS = 'waiting_for_members'
+    COLLECTING_CONTACTS = 'collecting_contacts'
 
 def get_main_menu():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -734,6 +737,192 @@ def handle_selection_complete(message):
         message.chat.id,
         summary,
         reply_markup=keyboard
+    )
+
+def create_deal_group(bot, creator_id):
+    """Creates a new deal group and returns group info"""
+    try:
+        # Create group with bot as admin
+        group_title = f"Deal Group {datetime.now().strftime('%Y%m%d%H%M')}"
+        group = bot.create_group_chat(group_title, [creator_id])
+        
+        # Generate invite link
+        invite_link = bot.export_chat_invite_link(group.id)
+        
+        return {
+            'group_id': group.id,
+            'invite_link': invite_link,
+            'creator_id': creator_id,
+            'members': {creator_id},
+            'pending_contacts': set()
+        }
+    except Exception as e:
+        print(f"Error creating group: {e}")
+        return None
+
+def setup_group_permissions(bot, group_id):
+    """Sets up restricted permissions for deal group"""
+    try:
+        # Restrict member permissions initially
+        permissions = types.ChatPermissions(
+            can_send_messages=False,
+            can_send_media_messages=False,
+            can_send_other_messages=False,
+            can_add_web_page_previews=False
+        )
+        bot.set_chat_permissions(group_id, permissions)
+        
+        # Pin a welcome message
+        msg = bot.send_message(
+            group_id,
+            "🤝 Welcome to the Deal Group!\n"
+            "New members please share your contact to participate."
+        )
+        bot.pin_chat_message(group_id, msg.message_id)
+        
+    except Exception as e:
+        print(f"Error setting group permissions: {e}")
+
+@bot.message_handler(commands=['create_deal_group'])
+def create_deal_group_command(message):
+    user_id = message.from_user.id
+    
+    # Verify user is registered
+    if not users.get(user_id, {}).get('is_registered'):
+        bot.reply_to(
+            message,
+            "Please register first by sharing your contact information."
+        )
+        return
+    
+    # Create the group
+    group_info = create_deal_group(bot, user_id)
+    if not group_info:
+        bot.reply_to(
+            message,
+            "Sorry, there was an error creating the deal group. Please try again."
+        )
+        return
+    
+    # Store group info
+    if 'deal_groups' not in users[user_id]:
+        users[user_id]['deal_groups'] = {}
+    users[user_id]['deal_groups'][group_info['group_id']] = group_info
+    
+    # Set user state
+    user_states[user_id] = State.WAITING_FOR_MEMBERS
+    
+    # Send invite link to creator
+    bot.reply_to(
+        message,
+        f"✅ Deal group created!\n\n"
+        f"Share this link with the person you want to make a deal with:\n"
+        f"{group_info['invite_link']}\n\n"
+        f"I'll notify you when they join and share their contact."
+    )
+    
+    # Setup group permissions and welcome message
+    setup_group_permissions(bot, group_info['group_id'])
+
+@bot.message_handler(content_types=['new_chat_members'])
+def handle_new_member(message):
+    """Handle new members joining the deal group"""
+    group_id = message.chat.id
+    new_member = message.new_chat_members[0]
+    
+    # Skip if new member is the bot itself
+    if new_member.is_bot:
+        return
+    
+    # Find group info
+    group_info = None
+    creator_id = None
+    for user_id, user_data in users.items():
+        if 'deal_groups' in user_data:
+            for gid, ginfo in user_data['deal_groups'].items():
+                if gid == group_id:
+                    group_info = ginfo
+                    creator_id = user_id
+                    break
+    
+    if not group_info:
+        return
+    
+    # Add to pending contacts
+    group_info['pending_contacts'].add(new_member.id)
+    
+    # Ask for contact
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(types.KeyboardButton('📱 Share Contact', request_contact=True))
+    
+    bot.send_message(
+        group_id,
+        f"Welcome {new_member.first_name}! 👋\n"
+        f"Please share your contact to proceed with the deal.",
+        reply_markup=keyboard
+    )
+
+@bot.message_handler(content_types=['contact'])
+def handle_contact_in_group(message):
+    """Handle contact sharing in deal groups"""
+    if not message.chat.type == 'group':
+        return handle_contact(message)  # Use existing handler for private chats
+    
+    user_id = message.from_user.id
+    group_id = message.chat.id
+    
+    # Find group info
+    group_info = None
+    creator_id = None
+    for uid, user_data in users.items():
+        if 'deal_groups' in user_data:
+            for gid, ginfo in user_data['deal_groups'].items():
+                if gid == group_id:
+                    group_info = ginfo
+                    creator_id = uid
+                    break
+    
+    if not group_info or user_id not in group_info['pending_contacts']:
+        return
+    
+    # Register user if needed
+    if user_id not in users:
+        users[user_id] = {
+            'username': message.from_user.username,
+            'phone': message.contact.phone_number,
+            'is_registered': True,
+            'first_name': message.contact.first_name,
+            'last_name': message.contact.last_name,
+            'reputation': 0,
+            'completed_deals': 0
+        }
+    
+    # Update group info
+    group_info['pending_contacts'].remove(user_id)
+    group_info['members'].add(user_id)
+    
+    # Enable chat permissions for this user
+    bot.restrict_chat_member(
+        group_id,
+        user_id,
+        permissions=types.ChatPermissions(
+            can_send_messages=True,
+            can_send_media_messages=True
+        )
+    )
+    
+    # Notify creator
+    bot.send_message(
+        creator_id,
+        f"✅ {message.from_user.first_name} has joined your deal group and shared their contact!\n"
+        f"You can now proceed with creating the deal."
+    )
+    
+    # Send confirmation to group
+    bot.send_message(
+        group_id,
+        "✅ Contact verified! You can now proceed with the deal.",
+        reply_markup=types.ReplyKeyboardRemove()
     )
 
 def main():
