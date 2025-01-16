@@ -231,7 +231,3 @@ async def register_savior(message: Message, state: FSMContext):
     await message.answer("Savior registered successfully! You will receive the deal shortly.")
 
 async def monitor_deal(deal_id):
-    # Logic to periodically check deal status
-    # Notify Initiator and Savior about deal conditions
-
-
