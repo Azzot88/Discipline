@@ -138,6 +138,8 @@ async def handle_contact(message: Message, state: FSMContext):
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
     logger.error(f"Update {update} caused error {exception}")
+    if isinstance(update, Message):
+        await update.answer("An error occurred while processing your request. Please try again.")
 
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
