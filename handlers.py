@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 
 from config import User, DealType
-from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard, get_settings_keyboard
+from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard, get_settings_keyboard, get_registration_keyboard, get_giver_selection_keyboard
 from deal_manager import DealManager
 
 # Initialize logger
@@ -24,19 +24,20 @@ class DealStates(StatesGroup):
 async def cmd_start(message: Message, state: FSMContext, data_manager=None):
     user_id = message.from_user.id
     if not data_manager.get_user(user_id):
-        user = User(
-            id=user_id,
-            username=message.from_user.username
-        )
+        user = User(id=user_id, username=message.from_user.username)
         data_manager.save_user(user_id, user.to_dict())
     
-    if message.chat.type == ChatType.PRIVATE:
-        await state.clear()
-        await message.answer(
-            "Welcome to DealVault Bot! 🎉\n\n"
-            "To get started, please share your contact information.",
-            reply_markup=get_contact_keyboard()
-        )
+    await state.clear()
+    await message.answer(
+        "Welcome to DealVault Bot! 🎉\n"
+        "Create and manage deals securely with friends and partners.\n\n"
+        "🤲 *Charity*: Help others or receive support – a gift.\n"
+        "💰 *Debt*: Lend or borrow – repay with surplus.\n"
+        "🔧 *Service*: Pay for work or services.\n"
+        "💡 *Venture*: Invest or collaborate – share responsibility.\n\n"
+        "Type /create_deal to start! 🚀",
+        reply_markup=get_registration_keyboard()  # Button to register
+    )
 
 @router.message(Command('create_deal_group'))
 async def cmd_create_deal(message: Message, state: FSMContext, data_manager=None):
@@ -196,5 +197,53 @@ async def update_user_activity(message: Message, data_manager=None):
         user = User.from_dict(user_data)
         user.last_active = datetime.now().isoformat()
         data_manager.save_user(message.from_user.id, user.to_dict())
+
+@router.message(F.text == 'Register')
+async def register_user(message: Message, state: FSMContext):
+    await state.set_state('deal_selection')  # Set state for deal selection
+    await message.answer(
+        "Please choose a deal type:",
+        reply_markup=get_deal_types_keyboard()  # Show deal types
+    )
+
+@router.message(F.text.in_(['Charity', 'Debt', 'Service', 'Venture']))
+async def choose_deal_amount(message: Message, state: FSMContext):
+    deal_type = message.text
+    await state.update_data(deal_type=deal_type)  # Save deal type
+    await state.set_state('amount_selection')  # Set state for amount selection
+    await message.answer(
+        "Please choose an amount:",
+        reply_markup=get_amount_selection_keyboard()  # Show amount options
+    )
+
+@router.message(F.text.in_(['100 USDT', '200 USDT', '500 USDT', '1000 USDT', 'Custom Amount']))
+async def select_giver(message: Message, state: FSMContext):
+    amount = message.text
+    await state.update_data(amount=amount)  # Save amount
+    await state.set_state('giver_selection')  # Set state for giver selection
+    await message.answer(
+        "Please select a Savior from your contacts or scan a QR code.",
+        reply_markup=get_giver_selection_keyboard()  # Show options for selecting Giver
+    )
+
+@router.message(F.text == 'Select from Contacts')
+async def select_from_contacts(message: Message, state: FSMContext):
+    # Logic to select a contact and create a deal
+    # Save deal in internal memory
+    await message.answer("Deal created! Waiting for Savior to register.")
+
+@router.message(F.text == 'Register Savior')
+async def register_giver(message: Message, state: FSMContext):
+    # Logic for Savior registration
+    # Notify Savior about the deal
+
+@router.message(F.text == 'Register Savior')
+async def register_giver(message: Message, state: FSMContext):
+    # Logic for Savior registration
+    # Notify Savior about the deal
+
+async def monitor_deal(deal_id):
+    # Logic to periodically check deal status
+    # Notify Initiator and Savior about deal conditions
 
 # Add other necessary handlers...
