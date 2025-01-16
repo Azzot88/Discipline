@@ -229,18 +229,12 @@ async def select_giver(message: Message, state: FSMContext):
 @router.message(F.text == 'Select from Contacts')
 async def select_from_contacts(message: Message, state: FSMContext):
     # Logic to select a contact and create a deal
-    # Save deal in internal memory
-    await message.answer("Deal created! Waiting for Savior to register.")
+    await message.answer("Please select a Savior from your contacts or scan a QR code.")
 
-@router.message(F.text == 'Register Savior')
-async def register_giver(message: Message, state: FSMContext):
+@router.message(F.text == 'Savior Registration')
+async def register_savior(message: Message, state: FSMContext):
     # Logic for Savior registration
-    # Notify Savior about the deal
-
-@router.message(F.text == 'Register Savior')
-async def register_giver(message: Message, state: FSMContext):
-    # Logic for Savior registration
-    # Notify Savior about the deal
+    await message.answer("Savior registered successfully! You will receive the deal shortly.")
 
 async def monitor_deal(deal_id):
     # Logic to periodically check deal status
