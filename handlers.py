@@ -4,9 +4,10 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
+from datetime import datetime
 
 from config import User, DealType
-from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard
+from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard, get_settings_keyboard
 from deal_manager import DealManager
 
 router = Router()
@@ -133,5 +134,46 @@ async def handle_contact(message: Message, state: FSMContext):
             "Use /create_deal_group to create a new deal.",
             reply_markup=get_main_menu()
         )
+
+@router.errors()
+async def error_handler(update: types.Update, exception: Exception):
+    logger.error(f"Update {update} caused error {exception}")
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Action cancelled", reply_markup=get_main_menu())
+
+@router.message(Command("complete_deal"))
+async def cmd_complete_deal(message: Message, data_manager=None):
+    if message.chat.type != ChatType.GROUP:
+        return
+        
+    deal = data_manager.get_deal_by_group(message.chat.id)
+    if not deal:
+        await message.answer("No active deal in this group")
+        return
+        
+    # Add completion logic
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message, data_manager=None):
+    user_data = data_manager.get_user(message.from_user.id)
+    if user_data:
+        user = User.from_dict(user_data)
+        settings_text = (
+            "Current Settings:\n"
+            f"🔔 Notifications: {user.settings.notifications}\n"
+            f"🌐 Language: {user.settings.language}"
+        )
+        await message.answer(settings_text, reply_markup=get_settings_keyboard())
+
+@router.message()
+async def update_user_activity(message: Message, data_manager=None):
+    user_data = data_manager.get_user(message.from_user.id)
+    if user_data:
+        user = User.from_dict(user_data)
+        user.last_active = datetime.now().isoformat()
+        data_manager.save_user(message.from_user.id, user.to_dict())
 
 # Add other necessary handlers...
