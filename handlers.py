@@ -28,13 +28,8 @@ async def cmd_start(message: Message, state: FSMContext, data_manager=None):
     
     await state.clear()
     await message.answer(
-        "Welcome to DealVault Bot! 🎉\n"
-        "Create and manage deals securely with friends and partners.\n\n"
-        "🤲 *Charity*: Help others or receive support – a gift.\n"
-        "💰 *Debt*: Lend or borrow – repay with surplus.\n"
-        "🔧 *Service*: Pay for work or services.\n"
-        "💡 *Venture*: Invest or collaborate – share responsibility.\n\n"
-        "Type /create_deal to start! 🚀",
+        "Welcome to the DealBot! 🎉\n\n"
+        "Here you can create and manage deals. Please register to get started.",
         reply_markup=get_registration_keyboard()  # Button to register
     )
 
