@@ -4,7 +4,6 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 import os
-from pathlib import Path  # Import Path for directory handling
 
 from handlers import router
 from middlewares import RegisterCheck
@@ -13,16 +12,12 @@ from data.data_manager import DataManager
 # Load environment variables
 load_dotenv()
 
-# Create necessary directories for logging
-log_dir = Path('data/logs')
-log_dir.mkdir(parents=True, exist_ok=True)  # Create the directory if it doesn't exist
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_dir / 'bot.log'),  # Use the created directory
+        logging.FileHandler('data/logs/bot.log'),
         logging.StreamHandler()
     ]
 )
