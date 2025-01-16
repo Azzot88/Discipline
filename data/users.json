@@ -7,6 +7,20 @@
         "last_name": "Doe",
         "reputation": 0,
         "completed_deals": 0,
-        "is_registered": true
+        "active_deals": ["deal_id1", "deal_id2"],
+        "is_registered": true,
+        "joined_date": "2024-01-15T12:00:00",
+        "last_active": "2024-01-15T12:00:00",
+        "settings": {
+            "notifications": true,
+            "language": "en"
+        },
+        "statistics": {
+            "total_deals_created": 0,
+            "total_deals_participated": 0,
+            "total_amount_handled": 0.0,
+            "successful_deals": 0,
+            "failed_deals": 0
+        }
     }
 } 

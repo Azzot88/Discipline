@@ -1,7 +1,6 @@
 from typing import Callable, Dict, Any, Awaitable
 from aiogram import BaseMiddleware
 from aiogram.types import Message
-from config import users
 
 class RegisterCheck(BaseMiddleware):
     async def __call__(
@@ -10,14 +9,16 @@ class RegisterCheck(BaseMiddleware):
         event: Message,
         data: Dict[str, Any]
     ) -> Any:
-        user_id = event.from_user.id
-        
         # Skip registration check for /start command
         if event.text and event.text == '/start':
             return await handler(event, data)
+        
+        # Get data manager from bot data
+        data_manager = data['bot'].get('data_manager')
+        user_data = data_manager.get_user(event.from_user.id)
             
         # Check if user is registered
-        if user_id not in users or not users[user_id].is_registered:
+        if not user_data or not user_data.get('is_registered'):
             await event.answer(
                 "Please register first using /start command"
             )

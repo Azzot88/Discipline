@@ -8,6 +8,28 @@
         "status": "active",
         "group_id": null,
         "members": ["user_id"],
-        "created_at": "2024-01-15T12:00:00"
+        "created_at": "2024-01-15T12:00:00",
+        "updated_at": "2024-01-15T12:00:00",
+        "completion_date": null,
+        "history": [
+            {
+                "timestamp": "2024-01-15T12:00:00",
+                "action": "created",
+                "user_id": "user_id"
+            }
+        ],
+        "metadata": {
+            "currency": "USD",
+            "payment_method": null,
+            "deadline": null,
+            "attachments": []
+        },
+        "participants": {
+            "user_id": {
+                "role": "creator",
+                "joined_at": "2024-01-15T12:00:00",
+                "status": "active"
+            }
+        }
     }
 } 

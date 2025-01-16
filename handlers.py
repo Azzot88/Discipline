@@ -5,9 +5,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
 
-from config import users, deals, DealType, User
+from config import User, DealType
 from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard
-from deal_manager import create_deal_group, setup_deal_chat, complete_deal
+from deal_manager import DealManager
 
 router = Router()
 
@@ -16,13 +16,17 @@ class DealStates(StatesGroup):
     entering_terms = State()
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, data_manager=None):
     user_id = message.from_user.id
-    if user_id not in users:
-        users[user_id] = User(id=user_id, username=message.from_user.username)
+    if not data_manager.get_user(user_id):
+        user = User(
+            id=user_id,
+            username=message.from_user.username
+        )
+        data_manager.save_user(user_id, user.to_dict())
     
     if message.chat.type == ChatType.PRIVATE:
-        await state.clear()  # Clear any previous states
+        await state.clear()
         await message.answer(
             "Welcome to DealVault Bot! 🎉\n\n"
             "To get started, please share your contact information.",
@@ -30,11 +34,16 @@ async def cmd_start(message: Message, state: FSMContext):
         )
 
 @router.message(Command('create_deal_group'))
-async def cmd_create_deal(message: Message, state: FSMContext):
+async def cmd_create_deal(message: Message, state: FSMContext, data_manager=None):
     if message.chat.type != ChatType.PRIVATE:
         return
     
-    await state.clear()  # Clear any previous states
+    user_data = data_manager.get_user(message.from_user.id)
+    if not user_data or not user_data.get('is_registered'):
+        await message.answer("Please register first using /start")
+        return
+    
+    await state.clear()
     await message.answer(
         "Please select the type of deal you want to create:",
         reply_markup=get_deal_types_keyboard()
