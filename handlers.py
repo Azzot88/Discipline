@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
 import logging
+import asyncio
 
 from config import User, DealType
 from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard, get_settings_keyboard, get_registration_keyboard, get_giver_selection_keyboard
@@ -231,3 +232,39 @@ async def register_savior(message: Message, state: FSMContext):
     await message.answer("Savior registered successfully! You will receive the deal shortly.")
 
 async def monitor_deal(deal_id):
+    # Retrieve the deal from the data manager
+    deal = data_manager.get_deal(deal_id)  # Assuming you have a method to get a deal by ID
+    if not deal:
+        logger.warning(f"Deal with ID {deal_id} not found.")
+        return
+
+    # Example of monitoring logic
+    while True:
+        # Check the current status of the deal
+        current_status = deal['status']  # Assuming deal has a 'status' field
+
+        if current_status == 'pending':
+            # Notify the Initiator and Savior about the pending status
+            initiator_id = deal['initiator_id']
+            savior_id = deal['savior_id']
+            await send_notification(initiator_id, f"Deal {deal_id} is still pending.")
+            await send_notification(savior_id, f"Deal {deal_id} is still pending.")
+
+        elif current_status == 'completed':
+            # Notify both parties that the deal is completed
+            await send_notification(initiator_id, f"Congratulations! Deal {deal_id} has been completed.")
+            await send_notification(savior_id, f"Congratulations! Deal {deal_id} has been completed.")
+            break  # Exit the loop if the deal is completed
+
+        elif current_status == 'failed':
+            # Notify both parties that the deal has failed
+            await send_notification(initiator_id, f"Deal {deal_id} has failed.")
+            await send_notification(savior_id, f"Deal {deal_id} has failed.")
+            break  # Exit the loop if the deal has failed
+
+        # Sleep for a certain period before checking again
+        await asyncio.sleep(60)  # Check every 60 seconds
+
+async def send_notification(user_id, message):
+    # Logic to send a notification to the user
+    await bot.send_message(user_id, message)  # Assuming you have access to the bot instance
