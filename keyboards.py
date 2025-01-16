@@ -2,8 +2,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup, 
     KeyboardButton,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    WebAppInfo
+    InlineKeyboardButton
 )
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
@@ -28,14 +27,6 @@ def get_deal_types_keyboard() -> InlineKeyboardMarkup:
     builder.button(text='🔧 Service', callback_data='create_service')
     builder.button(text='💡 Venture', callback_data='create_venture')
     builder.adjust(2)
-    return builder.as_markup()
-
-def get_start_bot_keyboard(bot_username: str) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="Share Contact (Private Chat)", 
-        url=f"https://t.me/{bot_username}?start=register"
-    )
     return builder.as_markup()
 
 def get_settings_keyboard() -> ReplyKeyboardMarkup:

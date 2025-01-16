@@ -119,25 +119,40 @@ async def on_new_member(message: Message):
                 )
 
 @router.message(F.content_type.in_({'contact'}))
-async def handle_contact(message: Message, state: FSMContext):
+async def handle_contact(message: Message, state: FSMContext, data_manager=None):
     if not message.contact:
+        await message.answer("No contact information received. Please try again.")
         return
         
     user_id = message.from_user.id
     contact = message.contact
     
-    if user_id == contact.user_id:  # Verify the contact belongs to the user
-        users[user_id].phone = contact.phone_number
-        users[user_id].first_name = contact.first_name
-        users[user_id].last_name = contact.last_name
-        users[user_id].is_registered = True
-        
-        await state.clear()
-        await message.answer(
-            "Thanks for registering! You can now participate in deals.\n"
-            "Use /create_deal_group to create a new deal.",
-            reply_markup=get_main_menu()
-        )
+    try:
+        if user_id == contact.user_id:  # Verify the contact belongs to the user
+            user_data = data_manager.get_user(user_id)
+            if user_data:
+                user = User.from_dict(user_data)
+                user.phone = contact.phone_number
+                user.first_name = contact.first_name
+                user.last_name = contact.last_name
+                user.is_registered = True
+                
+                # Update user data in the data manager
+                data_manager.save_user(user_id, user.to_dict())
+                
+                await state.clear()
+                await message.answer(
+                    "Thanks for registering! You can now participate in deals.\n"
+                    "Use the buttons below to navigate.",
+                    reply_markup=get_main_menu()  # Ensure this is a button interaction
+                )
+            else:
+                await message.answer("User data not found. Please restart the bot.")
+        else:
+            await message.answer("The contact does not belong to you. Please share your own contact.")
+    except Exception as e:
+        logger.error(f"Error handling contact: {e}")
+        await message.answer("An error occurred while processing your contact. Please try again.")
 
 @router.errors()
 async def error_handler(update: types.Update, exception: Exception):
