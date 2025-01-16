@@ -1,0 +1,12 @@
+{
+    "user_id": {
+        "id": "user_id",
+        "username": "example_user",
+        "phone": "+1234567890",
+        "first_name": "John",
+        "last_name": "Doe",
+        "reputation": 0,
+        "completed_deals": 0,
+        "is_registered": true
+    }
+} 
