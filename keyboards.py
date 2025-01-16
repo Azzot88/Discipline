@@ -37,3 +37,10 @@ def get_start_bot_keyboard(bot_username: str) -> InlineKeyboardMarkup:
         url=f"https://t.me/{bot_username}?start=register"
     )
     return builder.as_markup()
+
+def get_settings_keyboard() -> ReplyKeyboardMarkup:
+    builder = ReplyKeyboardBuilder()
+    builder.button(text='🔔 Notifications', callback_data='toggle_notifications')
+    builder.button(text='🌐 Language', callback_data='change_language')
+    builder.adjust(1)
+    return builder.as_markup(resize_keyboard=True)
