@@ -3,7 +3,6 @@ import os
 import logging
 from datetime import datetime
 from typing import Dict, Optional
-import asyncio
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
