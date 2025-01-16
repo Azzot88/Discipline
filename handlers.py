@@ -5,10 +5,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
 from datetime import datetime
+import logging
 
 from config import User, DealType
 from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard, get_settings_keyboard
 from deal_manager import DealManager
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 router = Router()
 
