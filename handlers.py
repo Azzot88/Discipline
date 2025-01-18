@@ -1,7 +1,7 @@
 from data.data_manager import DataManager
 from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
