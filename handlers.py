@@ -1,6 +1,7 @@
+from data.data_manager import DataManager
 from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
@@ -12,8 +13,11 @@ from typing import Optional
 from enum import Enum
 
 from config import User, DealType
-from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard, get_settings_keyboard, get_registration_keyboard, get_giver_selection_keyboard
+from keyboards import get_main_menu, get_contact_keyboard, get_settings_keyboard, get_giver_selection_keyboard
 from deal_manager import DealManager
+from data.data_manager import DataManager
+from models import DealType, Deal, DealStatus
+from dataclasses import asdict
 
 # Initialize logger
 logger = logging.getLogger(__name__)
