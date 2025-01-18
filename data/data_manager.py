@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Optional
 from pathlib import Path
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +103,14 @@ class DataManager:
             deal for deal in self.deals.values()
             if str(user_id) in [str(deal['creator_id']), *map(str, deal.get('members', []))]
         ] 
+    
+    def create_deal(self, deal_data: Dict) -> str:
+        deal_id = str(uuid.uuid4())
+        self.data["deals"][deal_id] = deal_data
+        logging.info(f"Deal {deal_id} created.")
+        return deal_id
+    
+    def update_deal(self, deal_id: str, update_data: Dict):
+        if deal_id in self.data["deals"]:
+            self.data["deals"][deal_id].update(update_data)
+            logging.info(f"Deal {deal_id} updated.") 

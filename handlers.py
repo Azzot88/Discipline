@@ -6,6 +6,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatType
 import logging
 import asyncio
+import uuid
+from dataclasses import dataclass
+from typing import Optional
+from enum import Enum
 
 from config import User, DealType
 from keyboards import get_main_menu, get_contact_keyboard, get_deal_types_keyboard, get_settings_keyboard, get_registration_keyboard, get_giver_selection_keyboard
@@ -268,3 +272,42 @@ async def monitor_deal(deal_id):
 async def send_notification(user_id, message):
     # Logic to send a notification to the user
     await bot.send_message(user_id, message)  # Assuming you have access to the bot instance
+
+@router.message(F.text.in_([DealType.CHARITY.value, DealType.DEBT.value, DealType.SERVICE.value, DealType.VENTURE.value]))
+async def create_deal(message: Message, state: FSMContext, data_manager: DataManager):
+    deal_type = DealType(message.text)
+    user_id = message.from_user.id
+    
+    deal_amount = await state.get_data().get("deal_amount")
+    
+    deal = Deal(
+        id=str(uuid.uuid4()),
+        type=deal_type,
+        amount=deal_amount,
+        initiator=user_id,
+    )
+    
+    deal_id = data_manager.create_deal(asdict(deal))
+    
+    await state.update_data(deal_id=deal_id)
+    
+    await message.answer("Deal created successfully!")
+
+async def notify_user(user_id: str, message: str):
+    try:
+        await bot.send_message(user_id, message)
+    except Exception as e:
+        logging.error(f"Failed to send notification to user {user_id}: {str(e)}")
+
+@router.callback_query(F.data == "accept_deal")
+async def accept_deal(callback_query: CallbackQuery, state: FSMContext, data_manager: DataManager):
+    deal_id = await state.get_data().get("deal_id")
+    deal = data_manager.get_deal(deal_id)
+    
+    if deal["status"] != DealStatus.ACCEPTED.value:
+        data_manager.update_deal(deal_id, {"status": DealStatus.ACCEPTED.value, "savior": callback_query.from_user.id})
+        
+        await notify_user(deal["initiator"], f"Your deal {deal_id} has been accepted!")
+        await notify_user(callback_query.from_user.id, f"You have accepted deal {deal_id}!")
+    
+    await callback_query.answer("Deal accepted!")
